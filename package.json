@@ -1,0 +1,60 @@
+{
+  "name": "@_deep4wee/agent-lens",
+  "version": "1.0.1",
+  "description": "Visual self-check UI runner for AI coding agents",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agent-lens": "dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"const fs = require('fs'); ['dist', 'artifacts'].forEach(d => fs.rmSync(d, {recursive: true, force: true})); const files = fs.readdirSync('.'); files.filter(f => f.endsWith('.tgz')).forEach(f => fs.unlinkSync(f));\"",
+    "build": "npm run clean && tsup",
+    "build:pack": "npm run build && npm pack",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "peerDependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "playwright": "^1.63.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "jiti": "^2.7.0",
+    "tree-kill": "^1.2.2"
+  },
+  "author": "deep4wee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deep4wee/agent-lens.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "visual",
+    "testing",
+    "playwright",
+    "automation",
+    "screenshot",
+    "ui"
+  ],
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/deep4wee/agent-lens/issues"
+  },
+  "homepage": "https://github.com/deep4wee/agent-lens#readme"
+}

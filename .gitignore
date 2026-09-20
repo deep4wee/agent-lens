@@ -1,0 +1,13 @@
+/artifacts
+/src/features/artifacts
+/node_modules
+
+# Ignore local test and development folders
+/scenarios
+/fixtures
+/.agents
+
+# Ignore source maps? (Optional, but usually we keep them or ignore them. We'll keep them for debugging)
+# *.map
+
+/dist

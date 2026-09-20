@@ -1,0 +1,12 @@
+# Ignore local test and development folders
+scenarios/
+fixtures/
+artifacts/
+.agents/
+
+# Ignore tarballs
+*.tgz
+dist/*.tgz
+
+# Ensure node_modules is ignored
+node_modules/
