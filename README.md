@@ -17,7 +17,7 @@
 AI coding agents (like Cursor, Claude Code, Gemini CLI, or Roo) are great at writing code, but they are **blind**. 
 
 When an agent builds a UI, it reports *"Done!"*, but it doesn't know if:
-- The CSS layout shifted or broke on mobile viewports.
+- The CSS layout shifted or broken on mobile viewports.
 - The modal opened off-screen or clips behind another layer.
 - An unhandled JavaScript error or `undefined` prop just crashed the React tree.
 
