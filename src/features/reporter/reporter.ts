@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import type { SnapshotMetadata, VisualScenario } from '../../shared/api/dsl';
-import type { ConsoleEntry } from './consoleTracker';
+import type { ConsoleEntry } from '../console-tracker/consoleTracker';
 
 export interface ReportData {
+        
   scenario: VisualScenario;
   snapshots: SnapshotMetadata[];
   consoleErrors: ConsoleEntry[];
@@ -55,10 +56,10 @@ export class VisualReporter {
       burstGroups.set(s.burstGroup!, list);
     });
 
-    for (const snap of regularSnapshots) {
-      const fileUri = `file:///${snap.filePath.replace(/\\/g, '/')}`;
+        for (const snap of regularSnapshots) {
+      const relativeLink = snap.relativeUri || `./${snap.fileName}`;
       rows.push(
-        `| **${String(snap.index).padStart(2, '0')}** | \`${snap.viewport.width}x${snap.viewport.height}\` | ${snap.name} | [${snap.fileName}](${fileUri}) |`
+        `| **${String(snap.index).padStart(2, '0')}** | \`${snap.viewport.width}x${snap.viewport.height}\` | ${snap.name} | [${snap.fileName}](${relativeLink}) |`
       );
     }
 
@@ -69,12 +70,13 @@ export class VisualReporter {
         burstSections += `#### Animation: \`${group}\` (${frames.length} frames)\n\n`;
         burstSections += `| Frame | Viewport | File | Preview |\n| :--- | :--- | :--- | :--- |\n`;
         for (const frame of frames) {
-          const fileUri = `file:///${frame.filePath.replace(/\\/g, '/')}`;
-          burstSections += `| Frame ${frame.frameIndex} | \`${frame.viewport.width}x${frame.viewport.height}\` | [${frame.fileName}](${fileUri}) | ![](${fileUri}) |\n`;
+          const relativeLink = frame.relativeUri || `./${frame.fileName}`;
+          burstSections += `| Frame ${frame.frameIndex} | \`${frame.viewport.width}x${frame.viewport.height}\` | [${frame.fileName}](${relativeLink}) | ![](${relativeLink}) |\n`;
         }
         burstSections += `\n`;
       }
     }
+        
 
     const healthStatus = this.getHealthStatus(consoleErrors, consoleWarnings);
     let consoleSections = '';
@@ -135,7 +137,9 @@ ${consoleSections}
 
 ## 📋 AI Agent Verification Checklist:
 - [ ] **Console Errors**: ${consoleErrors.length === 0 ? '✅ No errors found' : `❌ ${consoleErrors.length} errors — MUST REVIEW`}
+- [ ] **Visual Layout Check**: Inspect snapshots (e.g. view_image on \`./01_${regularSnapshots[0]?.fileName || 'quick_snap'}\`) for layout shifts or clipped elements.
 - [ ] **Responsiveness at \`1024x768\`**: Elements do not overflow the screen, no unwanted horizontal scroll.
+        
 - [ ] **Typography & Spacing**: Spacing matches the design system and layout grids.
 - [ ] **Color Palette & Theme**: Background tints and button accent colors match the concept.
 - [ ] **Component States**: Modals open centered, dropdowns do not overlap with other layers (z-index).

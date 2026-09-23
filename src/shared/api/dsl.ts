@@ -19,11 +19,21 @@ export const VIEWPORT_PRESETS = {
   FULL_HD: { name: 'full-hd', width: 1920, height: 1080 } as ViewportPreset,
 };
 
+export interface MockRouteEntry {
+  url: string;
+  method?: string;
+  status?: number;
+  body: any;
+  delayMs?: number;
+  headers?: Record<string, string>;
+}
+
 export interface CaptureOptions {
   selector?: string;
   fullPage?: boolean;
   mask?: string[];
 }
+        
 
 export interface CaptureBurstOptions {
   /** Total duration of burst animation capture in milliseconds */
@@ -117,20 +127,31 @@ export interface TestContext {
   /** Log a step for the agent */
   log: (message: string) => void;
 
-  // --- Mock IPC (preview mode only) ---
+    // --- Mock IPC & Network Routes (preview mode only) ---
 
   /**
    * Set a mock response for an IPC action.
-   * Changes the data returned by window.external.sendMessage in preview mode.
+   * Changes the data returned by window.__mockIpc.invoke or hybrid bridges in preview mode.
    * Ignored in desktop mode (IPC goes through real backend).
-   *
-   * Example:
-   *   await ctx.setMockIpc('GET_INSTANCES', [{ id: '...', name: 'Test' }]);
-   *   await ctx.setMockIpc('CREATE_INSTANCE', 'Some error', { type: 'ERROR' });
    */
   setMockIpc: (action: string, data: any, options?: { type?: MockIpcResponseType; delayMs?: number }) => Promise<void>;
 
+  /**
+   * Mock an HTTP REST or GraphQL network request in preview mode.
+   * Intercepts fetch/axios calls matching the URL pattern and returns mock data.
+   *
+   * Example:
+   *   await ctx.setMockRoute('/api/user', { id: 1, name: 'Agent' });
+   *   await ctx.setMockRoute('**\/api/items*', [], { status: 200, delayMs: 50 });
+   */
+  setMockRoute: (
+    url: string,
+    body: any,
+    options?: { method?: string; status?: number; delayMs?: number; headers?: Record<string, string> }
+  ) => Promise<void>;
+
   // --- Console Errors ---
+        
 
   /** Return all intercepted console.error and pageerror logs */
   getConsoleErrors: () => ConsoleEntry[];
@@ -167,15 +188,21 @@ export interface VisualScenario {
   route?: string;
   /** List of viewport sizes to test */
   viewports?: ViewportPreset[];
-  /**
+    /**
    * Initial IPC mock data for preview mode.
    * Applied BEFORE navigation to the route.
    */
   mockIpc?: Array<{ action: string; data: any; type?: MockIpcResponseType; delayMs?: number }>;
   /**
+   * Initial HTTP REST/GraphQL route mocks for preview mode.
+   * Applied BEFORE navigation to the route.
+   */
+  mockRoutes?: MockRouteEntry[];
+  /**
    * Optional setup hook: executed before the browser navigates and scenario runs.
    * Ideal for preparing mock files, test directories, or initial state.
    */
+        
   setup?: () => Promise<void> | void;
   /** The main body of the scenario */
   run: (ctx: TestContext) => Promise<void>;

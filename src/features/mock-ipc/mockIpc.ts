@@ -91,41 +91,44 @@ export function generateMockIpcScript(registry: MockIpcRegistry): string {
         }
       };
 
-      // Legacy fallback for generic window.external
-      if (!window.external) {
-        window.external = {};
-      }
-      
-      window.external.sendMessage = (msg) => {
-        try {
-          const parsed = JSON.parse(msg);
-          const action = parsed.Action || parsed.action;
-          const id = parsed.Id || parsed.id;
-
-          const mock = window.__visualRunnerMocks[action];
-
-          if (mock) {
-            const response = { Id: id, Type: mock.type || 'SUCCESS', Data: mock.data };
-            setTimeout(() => {
-              const cb = window.__mockCallback;
-              if (cb) cb(JSON.stringify(response));
-            }, mock.delayMs || 20);
-          } else {
-            setTimeout(() => {
-              const cb = window.__mockCallback;
-              if (cb) cb(JSON.stringify({ Id: id, Type: 'SUCCESS', Data: null }));
-            }, 20);
-          }
-        } catch (e) {
-          console.error('[Mock IPC] Failed to process legacy message:', e);
+            // Safe fallback bridge for hybrid webviews (Photino / CEF / WebView2)
+      try {
+        if (!window.external) {
+          (window as any).external = {};
         }
-      };
+        (window.external as any).sendMessage = (msg) => {
+          try {
+            const parsed = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            const action = parsed.Action || parsed.action;
+            const id = parsed.Id || parsed.id;
+            const mock = (window as any).__visualRunnerMocks[action];
 
-      window.external.receiveMessage = (callback) => {
-        window.__mockCallback = callback;
-      };
+            if (mock) {
+              const response = { Id: id, Type: mock.type || 'SUCCESS', Data: mock.data };
+              setTimeout(() => {
+                const cb = (window as any).__mockCallback;
+                if (typeof cb === 'function') cb(JSON.stringify(response));
+              }, mock.delayMs || 20);
+            } else {
+              setTimeout(() => {
+                const cb = (window as any).__mockCallback;
+                if (typeof cb === 'function') cb(JSON.stringify({ Id: id, Type: 'SUCCESS', Data: null }));
+              }, 20);
+            }
+          } catch (e) {
+            console.error('[Mock IPC] Failed to process message:', e);
+          }
+        };
 
-      console.log('[Visual Runner] Mock IPC bridge initialized with', Object.keys(window.__visualRunnerMocks).length, 'mocked actions');
+        (window.external as any).receiveMessage = (callback) => {
+          (window as any).__mockCallback = callback;
+        };
+      } catch {
+        // Ignored if window.external is read-only in strict Chromium sandboxes
+      }
+
+      console.log('[Visual Runner] Mock IPC bridge initialized with', Object.keys((window as any).__visualRunnerMocks).length, 'mocked actions');
     })();
+        
   `;
 }

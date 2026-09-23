@@ -4,8 +4,11 @@ import path from 'path';
 import fs from 'fs';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { chromium } from '../lib/playwrightLoader';
+import treeKill from 'tree-kill';
 
 export interface DesktopDriverOptions {
+        
+        
   port?: number;
   executablePath?: string;
   autoLaunch?: boolean;
@@ -95,11 +98,32 @@ export class DesktopDriver {
       }
 
       console.log(`[DesktopDriver] Launching: ${resolvedExe}`);
+      
+      // Ensure remote debugging port is passed as CLI flag for Electron / Chromium binaries
+      const finalArgs = [...this.args];
+      const hasDebugPort = finalArgs.some((a) => a.startsWith('--remote-debugging-port='));
+      if (!hasDebugPort) {
+        finalArgs.push(`--remote-debugging-port=${this.port}`);
+      }
+
+      // Also set WebView2 environment variable for .NET / Photino Windows apps
       const mergedEnv = {
         ...process.env,
         ...this.env,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${this.port}`
       };
+
+      this.processStderr = '';
+      this.processExited = false;
+      this.exitCode = null;
+
+      this.childProcess = spawn(resolvedExe, finalArgs, {
+        env: mergedEnv,
+        cwd: this.cwd || path.dirname(resolvedExe),
+        stdio: ['ignore', 'ignore', 'pipe'],
+        detached: false
+      });
+        ;
 
       this.processStderr = '';
       this.processExited = false;
@@ -157,18 +181,14 @@ export class DesktopDriver {
       this.browser = null;
     }
 
-    if (this.childProcess && !this.childProcess.killed) {
-      console.log('[DesktopDriver] Terminating spawned desktop process...');
-      try {
-        if (process.platform === 'win32' && this.childProcess.pid) {
-          spawn('taskkill', ['/pid', String(this.childProcess.pid), '/T', '/F'], { stdio: 'ignore' });
-        } else {
-          this.childProcess.kill('SIGTERM');
-        }
-      } catch {
-        // ignore
-      }
+        if (this.childProcess && !this.childProcess.killed && this.childProcess.pid) {
+      console.log('[DesktopDriver] Terminating spawned desktop process tree...');
+      const pid = this.childProcess.pid;
+      await new Promise<void>((resolve) => {
+        treeKill(pid, 'SIGTERM', () => resolve());
+      });
       this.childProcess = null;
     }
+        
   }
 }

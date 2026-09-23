@@ -37,8 +37,10 @@ Humans are forced to manually open the browser, take screenshots, and tell the a
 ## ✨ Features
 
 - ⚡ **Instant One-Shot Verification (`snap`)**: Verify any live URL across desktop and mobile in seconds without writing test files.
+- 🌐 **Network API Route Mocking**: Intercept REST/GraphQL calls (`mockRoutes` / `ctx.setMockRoute`) to test empty states, error boundaries, and edge cases without backend dependencies.
 - 🚀 **Managed Process Lifecycle**: Auto-launch dev servers (`--start="npm run dev"`), wait for the port, run tests, and cleanly shut down the process tree.
 - 📸 **Multi-Viewport Snapshots**: Test Desktop, Tablet, Mobile, and Widescreen layouts simultaneously.
+        
 - 📏 **Dynamic Auto-Resize (`resizeToFit`)**: Automatically fit the browser viewport tightly around any component to inspect it in isolation.
 - 🎬 **Burst Animations**: Capture frame-by-frame sequences of hover states, transitions, and dropdown menus.
 - 🔴 **Console Crash Tracker**: Automatically intercepts `console.error`, `console.warn`, and unhandled exceptions (`pageerror`) with stack traces.
@@ -108,12 +110,16 @@ export default defineVisualTest({
     await ctx.setPreset(VIEWPORT_PRESETS.DEFAULT);
     await ctx.capture('01_checkout_initial');
 
+        // --- Mock Network API ---
+    await ctx.setMockRoute('**/api/checkout/summary', { subtotal: 80, discount: 20, total: 60 });
+
     // --- Interaction ---
     await ctx.type('input[name="coupon"]', 'DISCOUNT2026');
     await ctx.click('button.apply-coupon');
     await ctx.wait(500);
 
     // --- Component Isolation ---
+        
     await ctx.resizeToFit('.cart-summary', 15);
     await ctx.capture('02_cart_summary_fitted');
 

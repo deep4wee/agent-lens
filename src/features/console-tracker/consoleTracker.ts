@@ -8,18 +8,10 @@ export interface ConsoleEntry {
   stack?: string;
 }
 
-/**
- *
- *   const tracker = new ConsoleTracker();
- *   tracker.attach(page);
- *   // ... run scenario ...
- */
 export class ConsoleTracker {
   private entries: ConsoleEntry[] = [];
   private attached = false;
 
-  /**
-   */
   public attach(page: Page): void {
     if (this.attached) return;
     this.attached = true;
@@ -101,8 +93,7 @@ export class ConsoleTracker {
     }
   }
 
-  /**
-   */
+
   private isIgnoredWarning(text: string): boolean {
     const ignoredPatterns = [
       'findDOMNode is deprecated',

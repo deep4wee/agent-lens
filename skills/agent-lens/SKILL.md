@@ -48,11 +48,15 @@ npx agent-lens --scenario=checkout-flow --url=http://localhost:5173
    npx agent-lens snap --url=http://localhost:5173
    ```
 4. **Inspect the Output**:
-   - AgentLens always writes the latest report to:
+   - AgentLens always synchronizes the most recent run to:
      `artifacts/latest/report.md`
-   - Use `view_file` to read `artifacts/latest/report.md` immediately without worrying about timestamped folder names.
-   - Check the **Console Errors** section — if errors exist, fix them!
-5. **Self-Correct & Iterate**: Re-run verification until the layout is solid and the console is clean.
+   - **Step 1 (Check Logs & Console)**: Use your file reading tool (`view_file`, `cat`) on `artifacts/latest/report.md`. If there are any **Console Errors**, fix the JavaScript / React exceptions first.
+   - **Step 2 (Vision Visual Check)**: If your environment supports multimodal / vision tools (e.g. `view_image`), inspect the latest generated screenshots directly:
+     `artifacts/latest/01_quick_snap_desktop.png`
+     `artifacts/latest/02_quick_snap_mobile.png`
+     Look for text overflow, unwanted horizontal scrolling, broken CSS flex/grid layouts, or misaligned elements.
+5. **Self-Correct & Iterate**: Re-run verification until the layout is visually solid and the console is clean.
+        
 
 ---
 
@@ -139,6 +143,17 @@ export default defineVisualTest({
   title: 'Feature Verification',
   route: '/dashboard', // Route or URL
   viewports: [VIEWPORT_PRESETS.DEFAULT, VIEWPORT_PRESETS.MIN_SUPPORTED],
+
+  // HTTP REST / GraphQL Network Mocks (Vite / Next.js / Web SPA)
+  mockRoutes: [
+    { url: '**/api/v1/user', body: { id: 1, name: 'Agent', role: 'admin' } },
+    { url: '**/api/v1/stats', body: { total: 42, active: 10 } }
+  ],
+
+  // Optional Hybrid / IPC mocks
+  mockIpc: [
+    { action: 'GET_PREFS', data: { theme: 'dark' } }
+  ],
   
   // Lifecycle Setup: prepare temporary state or mock folders
   setup: async () => {},
@@ -150,6 +165,7 @@ export default defineVisualTest({
   teardown: async () => {}
 });
 ```
+        
 
 ### Available `ctx` Methods:
 
@@ -184,8 +200,10 @@ export default defineVisualTest({
 - `ctx.getConsoleErrors()`: Array of caught errors with stack traces.
 - `ctx.getConsoleWarnings()`: Array of caught warnings.
 
-#### 🎭 Dynamic Mock IPC (Web / Preview mode)
-- `await ctx.setMockIpc('ACTION_NAME', payload, { type: 'SUCCESS' | 'ERROR', delayMs?: number })`: Dynamically alters mock data during test execution.
+#### 🌐 Network Route & Mock IPC (Preview mode)
+- `await ctx.setMockRoute('**/api/users', payload, options?)`: Dynamically intercepts HTTP/REST API endpoints and returns mock JSON or status codes.
+- `await ctx.setMockIpc('ACTION_NAME', payload, { type: 'SUCCESS' | 'ERROR', delayMs?: number })`: Dynamically alters mock data for hybrid IPC bridges.
+        
 
 ---
 

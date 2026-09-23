@@ -54,6 +54,8 @@ function parseViewportPresets(raw?: string[]): ViewportPreset[] {
   return presets.length > 0 ? presets : [VIEWPORT_PRESETS.DEFAULT, PRESET_MAP.mobile];
 }
 
+const CANDIDATE_PORTS = [5173, 3000, 4321, 4200, 8080, 8000, 3001];
+
 async function isPortResponding(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(800) });
@@ -63,6 +65,16 @@ async function isPortResponding(url: string): Promise<boolean> {
   }
 }
 
+async function detectActiveDevServer(): Promise<string | null> {
+  for (const port of CANDIDATE_PORTS) {
+    const url = `http://localhost:${port}`;
+    if (await isPortResponding(url)) {
+      return url;
+    }
+  }
+  return null;
+}
+
 export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
   let targetUrl = options.url;
   let useStaticPreview = false;
@@ -70,12 +82,10 @@ export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
 
   // Smart URL/Server Resolution when neither --url nor --start is explicitly provided
   if (!targetUrl && !options.start) {
-    if (await isPortResponding('http://localhost:5173')) {
-      targetUrl = 'http://localhost:5173';
-      console.log(`🌐 [Quick Snap] Detected active dev server on http://localhost:5173`);
-    } else if (await isPortResponding('http://localhost:3000')) {
-      targetUrl = 'http://localhost:3000';
-      console.log(`🌐 [Quick Snap] Detected active dev server on http://localhost:3000`);
+    const activeUrl = await detectActiveDevServer();
+    if (activeUrl) {
+      targetUrl = activeUrl;
+      console.log(`🌐 [Quick Snap] Detected active dev server on ${targetUrl}`);
     } else {
       // Check for compiled static files (dist, build, wwwroot)
       const candidateDir = resolveWwwrootDir();
@@ -84,7 +94,7 @@ export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
         wwwrootDir = candidateDir;
         console.log(`📦 [Quick Snap] No active server found. Detected built static directory at "${candidateDir}". Launching static preview...`);
       } else {
-        console.error(`\n❌ [Quick Snap] No active server found on http://localhost:5173 or :3000, and no static build found.`);
+        console.error(`\n❌ [Quick Snap] No active server found on common ports (${CANDIDATE_PORTS.join(', ')}), and no static build found.`);
         console.log(`💡 Suggested actions:`);
         console.log(`   1. Pass a start command:  npx agent-lens snap --start="npm run dev"`);
         console.log(`   2. Specify your URL:      npx agent-lens snap --url=http://localhost:8080`);
@@ -95,6 +105,7 @@ export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
   } else if (!targetUrl && options.start) {
     targetUrl = 'http://localhost:5173';
   }
+        
 
   const waitMs = options.waitMs ?? 1000;
   const snapshotPrefix = options.name || 'quick_snap';

@@ -4,7 +4,9 @@ import path from 'path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { chromium } from '../lib/playwrightLoader';
 import { MockIpcRegistry, generateMockIpcScript } from '../../features/mock-ipc/mockIpc';
+import type { MockRouteEntry } from '../api/dsl';
 import { resolveWwwrootDir } from '../lib/config';
+        
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -33,11 +35,13 @@ export class PreviewDriver {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private serverPort: number = 0;
+    private serverPort: number = 0;
   private options: PreviewDriverOptions;
   private _baseUrl: string = '';
+  private initialRouteMocks: MockRouteEntry[] = [];
 
   public readonly mockRegistry: MockIpcRegistry;
+        
 
   constructor(options?: PreviewDriverOptions) {
     this.options = options || {};
@@ -121,11 +125,51 @@ export class PreviewDriver {
       await this.context.addInitScript(mockScript);
     }
 
-    this.page = await this.context.newPage();
+        this.page = await this.context.newPage();
+
+    if (this.initialRouteMocks.length > 0) {
+      for (const entry of this.initialRouteMocks) {
+        await this.addRouteMock(entry);
+      }
+    }
+
     await this.page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
     return { page: this.page, context: this.context, browser: this.browser };
   }
+
+  public async addRouteMock(entry: MockRouteEntry): Promise<void> {
+    if (!this.page) {
+      this.initialRouteMocks.push(entry);
+      return;
+    }
+
+    await this.page.route(entry.url, async (route) => {
+      const req = route.request();
+      if (entry.method && req.method().toUpperCase() !== entry.method.toUpperCase()) {
+        return route.continue();
+      }
+
+      if (entry.delayMs) {
+        await new Promise((r) => setTimeout(r, entry.delayMs));
+      }
+
+      const isJson = typeof entry.body === 'object' && entry.body !== null;
+      await route.fulfill({
+        status: entry.status ?? 200,
+        contentType: isJson ? 'application/json' : 'text/plain; charset=utf-8',
+        body: isJson ? JSON.stringify(entry.body) : String(entry.body ?? ''),
+        headers: entry.headers
+      });
+    });
+  }
+
+  public async setupRouteMocks(routes: MockRouteEntry[]): Promise<void> {
+    for (const r of routes) {
+      await this.addRouteMock(r);
+    }
+  }
+        
 
   public async updateMockIpc(action: string, data: any, options?: { type?: string; delayMs?: number }): Promise<void> {
     if (!this.page) {

@@ -1,16 +1,16 @@
-#!/usr/bin/env node
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import { runVisualScenario } from '../features/runner/runner';
 import type { VisualScenario } from '../shared/api/dsl';
 import { createJiti } from 'jiti';
 import { loadConfig, resolveWwwrootDir, detectStartCwd } from '../shared/lib/config';
 import { runQuickSnap } from '../features/snap/snap';
 
-// 1. Load config from agent-lens.json or package.json
+// Load config from agent-lens.json or package.json
 const fileConfig = loadConfig();
 
-// 2. Parse CLI Arguments
+// Parse CLI Arguments
 const args = process.argv.slice(2);
 
 // Check subcommands
@@ -94,16 +94,20 @@ for (const arg of effectiveArgs) {
   } else if (arg.startsWith('--selector=')) {
     options.selector = arg.split('=')[1];
   } else if (arg.startsWith('--viewports=')) {
-    options.viewports = arg.split('=')[1].split(',').map((v) => v.trim()).filter(Boolean);
+    const raw = arg.slice('--viewports='.length);
+    options.viewports = raw.split(',').map((v: string) => v.trim()).filter(Boolean);
   } else if (arg.startsWith('--wait=')) {
-    options.waitMs = parseInt(arg.split('=')[1], 10);
+    options.waitMs = parseInt(arg.slice('--wait='.length), 10);
   } else if (arg.startsWith('--name=')) {
-    options.name = arg.split('=')[1];
-  } else if (arg.startsWith('--exe=') || arg.startsWith('--executable=')) {
-    options.exe = arg.split('=')[1];
+    options.name = arg.slice('--name='.length);
+  } else if (arg.startsWith('--exe=')) {
+    options.exe = arg.slice('--exe='.length);
+  } else if (arg.startsWith('--executable=')) {
+    options.exe = arg.slice('--executable='.length);
   } else if (arg.startsWith('--clean=') || arg.startsWith('--cleanup=')) {
-    const rawPaths = arg.split('=')[1];
-    options.clean = rawPaths.split(',').map((p) => p.trim()).filter(Boolean);
+    const prefix = arg.startsWith('--clean=') ? '--clean=' : '--cleanup=';
+    const rawPaths = arg.slice(prefix.length);
+    options.clean = rawPaths.split(',').map((p: string) => p.trim()).filter(Boolean);
   } else if (arg.startsWith('--dir=')) {
     options.dir = arg.split('=')[1];
   } else if (arg.startsWith('--wwwroot=')) {
@@ -201,7 +205,7 @@ export default defineVisualTest({
     console.log(`ℹ️ Template already exists at: ${templatePath}`);
   }
 
-  // 2. Generate starter mocks.ts to prevent root app crash
+  // Generate starter mocks.ts to prevent root app crash
   const mocksPath = path.join(targetDir, 'mocks.ts');
   if (!fs.existsSync(mocksPath)) {
     const mocksContent = `/**
@@ -268,7 +272,7 @@ function resolveScenariosDirectory(customDir?: string): string {
 }
 
 async function main() {
-  // 1. One-shot "snap" command execution
+  // One-shot "snap" command execution
   if (isSnapCommand || (options.url && !options.scenario && !options.all)) {
     const snapSuccess = await runQuickSnap({
       url: options.url,
@@ -314,7 +318,6 @@ async function main() {
       : (fileConfig.buildCommand || 'npm run build');
 
     console.log(`\n🔨 [Build] Running build process: "${buildCmd}"...`);
-    const { execSync } = require('child_process');
     try {
       execSync(buildCmd, { stdio: 'inherit', cwd: options.startCwd || process.cwd() });
     } catch (e) {

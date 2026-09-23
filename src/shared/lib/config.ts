@@ -1,154 +1,114 @@
-import fs from 'fs';
 import path from 'path';
+import fs from 'fs';
 
-export interface AgentLensConfig {
-  wwwroot?: string;
-  scenarios?: string;
-  outDir?: string;
-  autoBuild?: boolean;
+export interface AgentLensConfigFile {
+  mode?: 'desktop' | 'preview';
+  port?: number;
+  headed?: boolean;
+  detach?: boolean;
   buildCommand?: string;
-  executablePath?: string;
+  autoBuild?: boolean;
   startCommand?: string;
   startCwd?: string;
   cleanArtifacts?: boolean;
-  clean?: string[] | string;
-  env?: Record<string, string>;
   url?: string;
-  port?: number;
-  mode?: 'desktop' | 'preview';
-  headed?: boolean;
-  detach?: boolean;
+  executablePath?: string;
+  clean?: string | string[];
+  scenarios?: string;
+  wwwroot?: string;
+  outDir?: string;
+  env?: Record<string, string>;
 }
 
-/**
- * Searches and loads agent-lens configuration from:
- * 1. agent-lens.json in cwd
- * 2. "agentLens" field in package.json
- */
-export function loadConfig(cwd: string = process.cwd()): AgentLensConfig {
-  // 1. Check agent-lens.json
-  const configPath = path.join(cwd, 'agent-lens.json');
-  if (fs.existsSync(configPath)) {
+export function loadConfig(cwd: string = process.cwd()): AgentLensConfigFile {
+  const jsonConfigPath = path.join(cwd, 'agent-lens.json');
+  if (fs.existsSync(jsonConfigPath)) {
     try {
-      const raw = fs.readFileSync(configPath, 'utf8');
+      const raw = fs.readFileSync(jsonConfigPath, 'utf-8');
       return JSON.parse(raw);
-    } catch (e) {
-      console.warn(`⚠️ Warning: Failed to parse agent-lens.json:`, e);
+    } catch (e: any) {
+      console.warn(`⚠️ [Config] Failed to parse agent-lens.json: ${e.message}`);
     }
   }
 
-  // 2. Check package.json
-  const pkgPath = path.join(cwd, 'package.json');
-  if (fs.existsSync(pkgPath)) {
+  const packageJsonPath = path.join(cwd, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
     try {
-      const raw = fs.readFileSync(pkgPath, 'utf8');
+      const raw = fs.readFileSync(packageJsonPath, 'utf-8');
       const pkg = JSON.parse(raw);
       if (pkg.agentLens && typeof pkg.agentLens === 'object') {
         return pkg.agentLens;
       }
     } catch {
-      // Ignore package.json read errors
+      // ignore
     }
   }
 
   return {};
 }
 
-/**
- * Automatically discovers wwwroot directories if none are provided.
- * Supports standard SPAs, full-stack monorepos, and hybrid desktop apps (Photino, WPF, Electron).
- */
-export function resolveWwwrootDir(customPath?: string, cwd: string = process.cwd()): string {
-  if (customPath) {
-    return path.resolve(cwd, customPath);
+export function detectStartCwd(providedCwd?: string): string | undefined {
+  if (providedCwd) {
+    const resolved = path.resolve(process.cwd(), providedCwd);
+    if (fs.existsSync(resolved)) {
+      return providedCwd;
+    }
   }
 
-  // Common direct roots
-  const standardDirs = [
+  const rootPkgPath = path.join(process.cwd(), 'package.json');
+  let rootHasDevScript = false;
+  if (fs.existsSync(rootPkgPath)) {
+    try {
+      const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf-8'));
+      rootHasDevScript = Boolean(rootPkg.scripts?.dev || rootPkg.scripts?.start);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (rootHasDevScript) {
+    return undefined;
+  }
+
+  const candidates = ['Frontend', 'frontend', 'client', 'web', 'ui', 'apps/web', 'src/frontend'];
+  for (const candidate of candidates) {
+    const candidatePkg = path.join(process.cwd(), candidate, 'package.json');
+    if (fs.existsSync(candidatePkg)) {
+      return `./${candidate}`;
+    }
+  }
+
+  return undefined;
+}
+
+export function resolveWwwrootDir(customDir?: string): string {
+  if (customDir) {
+    return path.resolve(process.cwd(), customDir);
+  }
+
+  const candidates = [
     'dist',
     'build',
+    'out',
     'wwwroot',
     'Frontend/dist',
     'frontend/dist',
-    'client/dist',
-    'web/dist',
-    'ui/dist'
+    'client/dist'
   ];
 
-  for (const rel of standardDirs) {
-    const candidate = path.resolve(cwd, rel);
-    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
-      return candidate;
+  for (const c of candidates) {
+    const candidatePath = path.resolve(process.cwd(), c);
+    if (fs.existsSync(candidatePath) && fs.existsSync(path.join(candidatePath, 'index.html'))) {
+      return candidatePath;
     }
   }
 
-  // Deep recursive search for **/wwwroot containing index.html (useful for .NET Photino/WebView2)
-  const foundDeepWwwroot = findDeepIndexHtmlDir(cwd, 4);
-  if (foundDeepWwwroot) {
-    return foundDeepWwwroot;
-  }
-
-  // Fallback to first existing standard folder even if index.html is missing
-  for (const rel of standardDirs) {
-    const candidate = path.resolve(cwd, rel);
-    if (fs.existsSync(candidate)) {
-      return candidate;
+  for (const c of candidates) {
+    const candidatePath = path.resolve(process.cwd(), c);
+    if (fs.existsSync(candidatePath)) {
+      return candidatePath;
     }
   }
 
-  return path.resolve(cwd, 'dist');
-}
-
-/**
- * Auto-detects frontend subdirectory in monorepos (e.g. Frontend/, client/, web/)
- * when root package.json does not have dev script.
- */
-export function detectStartCwd(customCwd?: string, rootCwd: string = process.cwd()): string {
-  if (customCwd) {
-    return path.resolve(rootCwd, customCwd);
-  }
-
-  const subdirectories = ['Frontend', 'frontend', 'client', 'web', 'ui', 'app'];
-  for (const sub of subdirectories) {
-    const subPkg = path.join(rootCwd, sub, 'package.json');
-    if (fs.existsSync(subPkg)) {
-      try {
-        const json = JSON.parse(fs.readFileSync(subPkg, 'utf8'));
-        if (json.scripts && (json.scripts.dev || json.scripts.start || json.scripts.build)) {
-          return path.join(rootCwd, sub);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  return rootCwd;
-}
-
-function findDeepIndexHtmlDir(dir: string, maxDepth: number, currentDepth: number = 0): string | null {
-  if (currentDepth > maxDepth || !fs.existsSync(dir)) return null;
-
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'artifacts') {
-          continue;
-        }
-
-        const subDir = path.join(dir, entry.name);
-        if (entry.name === 'wwwroot' && fs.existsSync(path.join(subDir, 'index.html'))) {
-          return subDir;
-        }
-
-        const found = findDeepIndexHtmlDir(subDir, maxDepth, currentDepth + 1);
-        if (found) return found;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
+  return path.resolve(process.cwd(), 'dist');
 }

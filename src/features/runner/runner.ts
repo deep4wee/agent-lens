@@ -119,17 +119,27 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
         headed: options.headed
       });
 
-      // Apply declarative mockIpc from scenario and global mocks before start
+            // Apply declarative mockIpc from scenario and global mocks before start
       const mergedMocks = [...(options.globalMocks || []), ...(scenario.mockIpc || [])];
       if (mergedMocks.length > 0) {
         console.log(`📦 [Mock IPC] Applying ${mergedMocks.length} mocks`);
         previewDriver.mockRegistry.setBatch(mergedMocks);
       }
 
+      if (scenario.mockRoutes && scenario.mockRoutes.length > 0) {
+        console.log(`🌐 [Mock Network] Queuing ${scenario.mockRoutes.length} route mock(s)`);
+        await previewDriver.setupRouteMocks(scenario.mockRoutes);
+      }
+
       const res = await previewDriver.start(currentViewport);
       page = res.page;
       context = res.context;
+
+      if (scenario.mockRoutes && scenario.mockRoutes.length > 0) {
+        await previewDriver.setupRouteMocks(scenario.mockRoutes);
+      }
     }
+        
 
     // Attach console error interception
     consoleTracker.attach(page);
@@ -290,7 +300,7 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
 
       // ─── Mock IPC ───
 
-      setMockIpc: async (action: string, data: any, mockOptions?) => {
+            setMockIpc: async (action: string, data: any, mockOptions?) => {
         if (targetMode === 'desktop') {
           console.log(`⚠️ [Mock IPC] setMockIpc ignored in desktop mode (real backend handles IPC)`);
           return;
@@ -303,8 +313,29 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
         await previewDriver.updateMockIpc(action, data, mockOptions);
       },
 
+      setMockRoute: async (url: string, body: any, routeOptions?) => {
+        if (targetMode === 'desktop') {
+          console.log(`⚠️ [Mock Route] setMockRoute ignored in desktop mode`);
+          return;
+        }
+        if (!previewDriver) {
+          console.log(`⚠️ [Mock Route] PreviewDriver not available`);
+          return;
+        }
+        console.log(`🌐 [Mock Route] Intercepting ${routeOptions?.method || 'ALL'} ${url} -> ${routeOptions?.status ?? 200}`);
+        await previewDriver.addRouteMock({
+          url,
+          body,
+          method: routeOptions?.method,
+          status: routeOptions?.status,
+          delayMs: routeOptions?.delayMs,
+          headers: routeOptions?.headers
+        });
+      },
+
 
       getConsoleErrors: () => consoleTracker.getErrors(),
+        
       getConsoleWarnings: () => consoleTracker.getWarnings(),
       hasConsoleErrors: () => consoleTracker.hasErrors,
 
