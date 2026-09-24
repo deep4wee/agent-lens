@@ -1,12 +1,8 @@
 import type { Page, ConsoleMessage } from 'playwright';
+import type { ConsoleEntry } from '../../shared/types/console';
 
-export interface ConsoleEntry {
-  level: 'error' | 'warning' | 'info' | 'log' | 'debug';
-  text: string;
-  url: string;
-  timestamp: string;
-  stack?: string;
-}
+export type { ConsoleEntry };
+
 
 export class ConsoleTracker {
   private entries: ConsoleEntry[] = [];

@@ -1,18 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import type { SnapshotMetadata, VisualScenario } from '../../shared/api/dsl';
-import type { ConsoleEntry } from '../console-tracker/consoleTracker';
+import type { ConsoleEntry } from '../../shared/types/console';
+import type { ReportData } from '../../shared/types/report';
 
-export interface ReportData {
-        
-  scenario: VisualScenario;
-  snapshots: SnapshotMetadata[];
-  consoleErrors: ConsoleEntry[];
-  consoleWarnings: ConsoleEntry[];
-  outputDir: string;
-  targetMode: 'desktop' | 'preview';
-  durationMs: number;
-}
+export type { ReportData };
+
 
 export class VisualReporter {
   public static generateReport(data: ReportData): string {
@@ -114,6 +107,13 @@ export class VisualReporter {
       }
     }
 
+    let pluginSections = '';
+    if (data.customSections && data.customSections.length > 0) {
+      for (const sec of data.customSections) {
+        pluginSections += `\n## ${sec.title}\n\n${sec.content}\n\n`;
+      }
+    }
+
     const reportContent = `# 📸 Visual Test Report: ${scenario.title}
 
 > **Scenario ID:** \`${scenario.id}\`  
@@ -133,6 +133,7 @@ ${rows.join('\n')}
 
 ${burstSections}
 ${consoleSections}
+${pluginSections}
 ---
 
 ## 📋 AI Agent Verification Checklist:

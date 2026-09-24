@@ -1,278 +1,43 @@
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
-import { runVisualScenario } from '../features/runner/runner';
-import type { VisualScenario } from '../shared/api/dsl';
 import { createJiti } from 'jiti';
-import { loadConfig, resolveWwwrootDir, detectStartCwd } from '../shared/lib/config';
+import { loadConfig, resolveWwwrootDir } from '../shared/lib/config';
+import { runVisualScenario } from '../features/runner';
 import { runQuickSnap } from '../features/snap/snap';
+import type { VisualScenario } from '../shared/api/dsl';
+import { parseCliArgs } from './lib/argsParser';
+import { printHelp } from './lib/help';
+import { initScenarioTemplate } from './lib/templateInit';
+import { findScenarios, resolveScenariosDirectory } from './lib/scenarioFinder';
 
-// Load config from agent-lens.json or package.json
-const fileConfig = loadConfig();
+import { handleLiveCli } from '../plugins/live-controller/actions';
 
-// Parse CLI Arguments
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
 
-// Check subcommands
-if (args[0] === 'init') {
-  initScenarioTemplate();
-  process.exit(0);
-}
+if (rawArgs[0] === 'live') {
+  handleLiveCli(rawArgs.slice(1))
+    .then((success) => process.exit(success ? 0 : 1))
+    .catch((err) => {
+      console.error('❌ Live command failed:', err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
+} else {
+  const fileConfig = loadConfig();
+  const { isSnapCommand, isInitCommand, options } = parseCliArgs(rawArgs, fileConfig);
 
-const isSnapCommand = args[0] === 'snap';
-const effectiveArgs = isSnapCommand ? args.slice(1) : args;
-
-const options: {
-  scenario?: string;
-  mode: 'desktop' | 'preview';
-  all?: boolean;
-  port: number;
-  help?: boolean;
-  headed?: boolean;
-  detach?: boolean;
-  build?: boolean | string;
-  start?: string;
-  startCwd?: string;
-  cleanArtifacts?: boolean;
-  url?: string;
-  selector?: string;
-  viewports?: string[];
-  waitMs?: number;
-  name?: string;
-  exe?: string;
-  clean?: string[];
-  dir?: string;
-  wwwroot?: string;
-  outDir?: string;
-} = {
-  mode: fileConfig.mode || 'preview',
-  port: fileConfig.port || 9222,
-  headed: fileConfig.headed ?? false,
-  detach: fileConfig.detach ?? false,
-  build: fileConfig.buildCommand || false,
-  start: fileConfig.startCommand,
-  startCwd: fileConfig.startCwd,
-  cleanArtifacts: fileConfig.cleanArtifacts ?? false,
-  url: fileConfig.url,
-  exe: fileConfig.executablePath,
-  clean: Array.isArray(fileConfig.clean) ? fileConfig.clean : (fileConfig.clean ? [fileConfig.clean] : undefined),
-  dir: fileConfig.scenarios,
-  wwwroot: fileConfig.wwwroot,
-  outDir: fileConfig.outDir
-};
-
-for (const arg of effectiveArgs) {
-  if (arg === '--help' || arg === '-h') {
-    options.help = true;
-  } else if (arg.startsWith('--scenario=')) {
-    options.scenario = arg.split('=')[1];
-  } else if (arg === '--all') {
-    options.all = true;
-  } else if (arg.startsWith('--mode=')) {
-    const mode = arg.split('=')[1].toLowerCase();
-    if (mode === 'desktop' || mode === 'preview') {
-      options.mode = mode as 'desktop' | 'preview';
-    }
-  } else if (arg.startsWith('--port=')) {
-    options.port = parseInt(arg.split('=')[1], 10) || 9222;
-  } else if (arg === '--headed') {
-    options.headed = true;
-  } else if (arg === '--detach') {
-    options.detach = true;
-  } else if (arg === '--build') {
-    options.build = true;
-  } else if (arg.startsWith('--build=')) {
-    options.build = arg.slice('--build='.length);
-  } else if (arg.startsWith('--start=')) {
-    options.start = arg.slice('--start='.length);
-  } else if (arg.startsWith('--start-cwd=') || arg.startsWith('--cwd=')) {
-    options.startCwd = arg.split('=')[1];
-  } else if (arg === '--clean-artifacts') {
-    options.cleanArtifacts = true;
-  } else if (arg.startsWith('--url=')) {
-    options.url = arg.split('=')[1];
-  } else if (arg.startsWith('--selector=')) {
-    options.selector = arg.split('=')[1];
-  } else if (arg.startsWith('--viewports=')) {
-    const raw = arg.slice('--viewports='.length);
-    options.viewports = raw.split(',').map((v: string) => v.trim()).filter(Boolean);
-  } else if (arg.startsWith('--wait=')) {
-    options.waitMs = parseInt(arg.slice('--wait='.length), 10);
-  } else if (arg.startsWith('--name=')) {
-    options.name = arg.slice('--name='.length);
-  } else if (arg.startsWith('--exe=')) {
-    options.exe = arg.slice('--exe='.length);
-  } else if (arg.startsWith('--executable=')) {
-    options.exe = arg.slice('--executable='.length);
-  } else if (arg.startsWith('--clean=') || arg.startsWith('--cleanup=')) {
-    const prefix = arg.startsWith('--clean=') ? '--clean=' : '--cleanup=';
-    const rawPaths = arg.slice(prefix.length);
-    options.clean = rawPaths.split(',').map((p: string) => p.trim()).filter(Boolean);
-  } else if (arg.startsWith('--dir=')) {
-    options.dir = arg.split('=')[1];
-  } else if (arg.startsWith('--wwwroot=')) {
-    options.wwwroot = arg.split('=')[1];
-  } else if (arg.startsWith('--outDir=') || arg.startsWith('--folder=')) {
-    options.outDir = arg.split('=')[1];
+  if (isInitCommand) {
+    initScenarioTemplate();
+    process.exit(0);
   }
-}
-
-// Auto-detect startCwd if a start command was provided in a monorepo setup
-if (options.start && !options.startCwd) {
-  options.startCwd = detectStartCwd(options.startCwd);
-}
-
-function printHelp() {
-  console.log(`
-👁️ AgentLens - Visual UI Self-Verification for AI Agents
-
-Usage:
-  npx agent-lens snap [options]      Instant one-shot visual & console check (no test files needed)
-  npx agent-lens [options]           Run scripted scenario tests from scenarios/
-  npx agent-lens init                Generate starter scenario template & mocks
-
-Commands:
-  snap                 Take immediate multi-viewport screenshots of a URL & check console errors
-  init                 Generate starter template in scenarios/template.scenario.ts and mocks.ts
-
-Options:
-  --url=<url>          Target URL to test (e.g. http://localhost:5173 or http://localhost:3000)
-  --start="<cmd>"      Launch dev server or backend process before testing (e.g. --start="npm run dev")
-  --start-cwd=<path>   Directory to execute --start command in (e.g. --start-cwd=./Frontend)
-  --clean-artifacts    Purge previous test artifacts to prevent folder bloat
-  --selector=<css>     Target a specific element to focus on / resize-to-fit
-  --viewports=<list>   Comma-separated viewport presets (default: desktop,mobile; or 1200x800,375x667)
-  --wait=<ms>          Wait time in milliseconds after loading before snapshotting [default: 1000]
-  --name=<prefix>      Custom name prefix for captured snapshots [default: quick_snap]
-  --scenario=<name>    Run specific scenario by name (e.g. --scenario=smoke)
-  --all                Run all discovered scenarios
-  --mode=<mode>        Engine mode: 'preview' (Web/Vite/Live) or 'desktop' (WebView2/CDP) [default: preview]
-  --exe=<path>         Path to native executable for desktop mode (e.g. --exe=bin/MyApp.exe)
-  --port=<port>        CDP remote debugging port [default: 9222]
-  --build[=<cmd>]      Run build command before testing (e.g. --build="dotnet build" or npm run build)
-  --clean=<paths>      Comma-separated paths to safely delete upon test exit (e.g. --clean="./temp,./cache")
-  --headed             Show Chromium browser window
-  --detach             Keep browser/app open after finishing
-  --dir=<path>         Custom scenarios directory [default: scenarios]
-  --wwwroot=<path>     Custom directory for static fallback mode [default: dist]
-  --folder=<path>      Directory to save visual artifacts/reports (also --outDir)
-  --help, -h           Show this help message
-  `);
-}
-
-function initScenarioTemplate() {
-  const targetDir = path.resolve(process.cwd(), 'scenarios');
-  if (!fs.existsSync(targetDir)) {
-    fs.mkdirSync(targetDir, { recursive: true });
-  }
-
-  // 1. Generate template.scenario.ts
-  const templatePath = path.join(targetDir, 'template.scenario.ts');
-  if (!fs.existsSync(templatePath)) {
-    const templateContent = `import { defineVisualTest, VIEWPORT_PRESETS } from 'agent-lens';
-
-export default defineVisualTest({
-  id: 'template-check',
-  title: 'Basic UI Smoke & Responsiveness Check',
-  route: '/',
-  // Optional setup hook before test runs
-  setup: async () => {
-    // prepare test files or folders
-  },
-  run: async (ctx) => {
-    ctx.log('Initial page render');
-    await ctx.capture('01_initial_state');
-
-    // Test adaptive layout
-    await ctx.setPreset(VIEWPORT_PRESETS.MIN_SUPPORTED);
-    await ctx.capture('02_compact_view');
-
-    // Check for JavaScript / React runtime errors
-    const errors = ctx.getConsoleErrors();
-    if (errors.length > 0) {
-      ctx.log(\`⚠️ Warning: Caught \${errors.length} console errors!\`);
-    }
-  },
-  // Optional teardown hook guaranteed to run on exit
-  teardown: async () => {
-    // clean up temporary test files or state
-  }
-});
-`;
-    fs.writeFileSync(templatePath, templateContent, 'utf8');
-    console.log(`✅ Starter scenario generated at: ${templatePath}`);
-  } else {
-    console.log(`ℹ️ Template already exists at: ${templatePath}`);
-  }
-
-  // Generate starter mocks.ts to prevent root app crash
-  const mocksPath = path.join(targetDir, 'mocks.ts');
-  if (!fs.existsSync(mocksPath)) {
-    const mocksContent = `/**
- * Global IPC & API Mocks
- * 
- * Export an array of base mocks to satisfy root application state on boot.
- */
-export default [
-  { action: 'GET_PREFS', data: { theme: 'dark', language: 'en' } },
-  { action: 'GET_USER_PROFILE', data: { id: 1, name: 'Agent', role: 'admin' } }
-];
-`;
-    fs.writeFileSync(mocksPath, mocksContent, 'utf8');
-    console.log(`✅ Base global mocks generated at: ${mocksPath}`);
-  }
-
-  console.log(`👉 Run tests with: npx agent-lens --scenario=template --mode=preview`);
-}
 
 if (options.help) {
   printHelp();
   process.exit(0);
 }
 
-async function findScenarios(dir: string, specificName?: string): Promise<string[]> {
-  const results: string[] = [];
-  if (!fs.existsSync(dir)) return results;
-
-  const items = fs.readdirSync(dir, { withFileTypes: true });
-  for (const item of items) {
-    const fullPath = path.join(dir, item.name);
-    if (item.isDirectory()) {
-      results.push(...await findScenarios(fullPath, specificName));
-    } else if (item.name.endsWith('.scenario.ts') || item.name.endsWith('.scenario.js')) {
-      if (!specificName || item.name.startsWith(specificName)) {
-        results.push(fullPath);
-      }
-    }
-  }
-  return results;
-}
-
-function resolveScenariosDirectory(customDir?: string): string {
-  if (customDir) {
-    return path.resolve(process.cwd(), customDir);
-  }
-
-  const candidates = [
-    'scenarios',
-    'tests/visual',
-    'tests/scenarios',
-    'test/scenarios',
-    'src/scenarios'
-  ];
-
-  for (const c of candidates) {
-    const p = path.resolve(process.cwd(), c);
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-
-  return path.resolve(process.cwd(), 'scenarios');
-}
-
 async function main() {
-  // One-shot "snap" command execution
+  // 1. One-shot "snap" command execution
   if (isSnapCommand || (options.url && !options.scenario && !options.all)) {
     const snapSuccess = await runQuickSnap({
       url: options.url,
@@ -287,9 +52,11 @@ async function main() {
       headed: options.headed,
       detach: options.detach,
       outDir: options.outDir,
-      mode: options.mode,
+      mode: options.mode as any,
       exe: options.exe,
-      port: options.port
+      port: options.port,
+      plugins: options.plugins,
+      fullPage: options.fullPage
     });
 
     process.exit(snapSuccess ? 0 : 1);
@@ -355,6 +122,11 @@ async function main() {
     }
   }
 
+  // Auto-load mock-ipc plugin if global mocks or scenario mockIpc are present
+  if (globalMocks.length > 0 && !options.plugins?.includes('mock-ipc')) {
+    options.plugins = ['mock-ipc', ...(options.plugins || [])];
+  }
+
   let allSuccess = true;
   for (const scenarioPath of scenarioPaths) {
     try {
@@ -366,9 +138,15 @@ async function main() {
         continue;
       }
 
+      // If scenario requires mockIpc, ensure plugin is active
+      const scenarioPlugins = [...(options.plugins || [])];
+      if (scenario.mockIpc && scenario.mockIpc.length > 0 && !scenarioPlugins.includes('mock-ipc')) {
+        scenarioPlugins.push('mock-ipc');
+      }
+
       const result = await runVisualScenario({
         scenario,
-        targetMode: options.mode,
+        targetMode: options.mode as any,
         url: options.url,
         startCommand: options.start,
         startCwd: options.startCwd,
@@ -381,7 +159,8 @@ async function main() {
         desktopEnv: fileConfig.env,
         wwwrootDir: options.wwwroot ? resolveWwwrootDir(options.wwwroot) : undefined,
         artifactsRoot: options.outDir ? path.resolve(process.cwd(), options.outDir) : undefined,
-        globalMocks
+        globalMocks,
+        plugins: scenarioPlugins
       });
 
       if (!result.success) {
@@ -402,3 +181,4 @@ main().catch((err) => {
   console.error('Fatal error:', err);
   process.exit(1);
 });
+}

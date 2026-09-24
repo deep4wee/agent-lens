@@ -1,36 +1,72 @@
 ---
 name: agent-lens
-description: Visual UI self-verification tool for AI agents. Take responsive multi-viewport snapshots of live URLs or run scripted interaction scenarios in Chromium or native desktop WebView2. Catches visual regressions, layout shifts, silent console errors, and runtime exceptions.
+description: Visual UI self-verification platform for AI agents. Take responsive multi-viewport snapshots of live URLs, drive interactive real-time browser sessions, inspect semantic accessibility trees, detect visual regressions with pixel diffing, or run scripted interaction scenarios in Chromium or native desktop WebView2.
 ---
 
-# 👁️ AgentLens
+# 👁️ AgentLens (Microkernel Agentic UI Platform)
 
-**AgentLens** is a visual self-verification tool designed specifically for autonomous AI coding agents.
+**AgentLens** gives AI coding agents **eyes** and **hands** to test and verify user interfaces before reporting back to humans.
 
-Instead of writing frontend code and blindly guessing if it looks right, AgentLens gives you **eyes**. You can capture multi-viewport screenshots of your running app, focus on isolated components, test animations, intercept silent JavaScript errors, and inspect the resulting markdown report to iterate autonomously before showing the final result to the user.
+Instead of writing frontend code and blindly guessing if it looks right or works properly, AgentLens allows you to:
+1. Capture multi-viewport screenshots of your running app with one-shot `snap`.
+2. Inspect entire scrollable pages with `--full`.
+3. Drive interactive step-by-step browser sessions via persistent `live` commands (`click`, `type`, `snap`) without cold-start browser restarts.
+4. "Read" the exact semantic hierarchy and interactive states using the `a11y-tree` plugin (essential for text-only LLMs or accessibility audits).
+5. Detect pixel-level visual regressions using the `visual-diff` plugin.
+6. Intercept silent JavaScript runtime errors, unhandled promise rejections, and missing assets.
+7. Author your own 1-file plugins on-the-fly in `.agent-lens/plugins/` to solve novel project constraints.
 
 ---
 
-## ⚡ Two Modes of Agent Verification
+## ⚡ 3 Ways for an Agent to Interact
 
-### 1. Instant Verification (`snap`) — No test files needed!
-Ideal for 90% of tasks when you just modified a page, component, or layout:
+### 1. Instant One-Shot Verification (`snap`)
+Ideal for 90% of tasks when you just modified a page, component, or responsive layout:
 ```bash
-# Verify a live dev server across desktop & mobile viewports:
+# Verify live dev server across desktop & mobile viewports:
 npx agent-lens snap --url=http://localhost:5173
+
+# Capture entire scrollable page height:
+npx agent-lens snap --url=http://localhost:5173 --full
 
 # Auto-start dev server in a monorepo (e.g. Frontend/), snap, and auto-terminate:
 npx agent-lens snap --start="npm run dev" --start-cwd=./Frontend
 
-# Zero-config smart snap (auto-detects active server or static build):
-npx agent-lens snap
-
 # Focus strictly on one component:
 npx agent-lens snap --url=http://localhost:5173/settings --selector=".pricing-card"
+
+# Extract semantic accessibility tree during snap:
+npx agent-lens snap --url=http://localhost:5173 --plugin=a11y-tree
 ```
 
-### 2. Scripted Scenarios (`npx agent-lens --scenario=<name>`)
-For multi-step flows, form submissions, state mocks, and complex assertions:
+---
+
+### 2. Interactive Live Controller Loop (`live`)
+Ideal for multi-step flows, debugging interactions, or iterative visual tuning without restarting the browser on each action:
+
+```bash
+# Step 1: Start background session (launches browser on CDP port 9223)
+npx agent-lens live start --url=http://localhost:5173
+
+# Step 2: Click via Vision physical coordinates or CSS selector
+npx agent-lens live click 450 180
+npx agent-lens live click "button.open-modal"
+
+# Step 3: Fill inputs
+npx agent-lens live type "input[name='email']" "agent@example.com"
+
+# Step 4: Capture current screen or full scrollable page
+npx agent-lens live snap step_02 --full
+
+# Step 5: Stop session when done
+npx agent-lens live stop
+```
+> 💡 *Every live action automatically updates `artifacts/live/current.png` in ~50ms, allowing instant visual feedback.*
+
+---
+
+### 3. Scripted Scenarios (`scenarios/*.scenario.ts`)
+For reproducible test suites, state mocking, animations, and regression diffing:
 ```bash
 npx agent-lens --scenario=checkout-flow --url=http://localhost:5173
 ```
@@ -39,24 +75,58 @@ npx agent-lens --scenario=checkout-flow --url=http://localhost:5173
 
 ## 🧭 The Agent Workflow
 
-1. **Write or Edit the Code**: Implement the requested UI changes or components.
-2. **Choose Your Verification Method**:
-   - **Quick check**: Run `npx agent-lens snap`.
-   - **Interactive check**: Write a scenario file in `scenarios/<name>.scenario.ts`.
-3. **Execute the Runner**:
-   ```bash
-   npx agent-lens snap --url=http://localhost:5173
-   ```
-4. **Inspect the Output**:
-   - AgentLens always synchronizes the most recent run to:
-     `artifacts/latest/report.md`
-   - **Step 1 (Check Logs & Console)**: Use your file reading tool (`view_file`, `cat`) on `artifacts/latest/report.md`. If there are any **Console Errors**, fix the JavaScript / React exceptions first.
-   - **Step 2 (Vision Visual Check)**: If your environment supports multimodal / vision tools (e.g. `view_image`), inspect the latest generated screenshots directly:
-     `artifacts/latest/01_quick_snap_desktop.png`
-     `artifacts/latest/02_quick_snap_mobile.png`
-     Look for text overflow, unwanted horizontal scrolling, broken CSS flex/grid layouts, or misaligned elements.
-5. **Self-Correct & Iterate**: Re-run verification until the layout is visually solid and the console is clean.
-        
+```mermaid
+flowchart TD
+    Edit["1. Edit Code (UI / CSS / Logic)"] --> Choose["2. Choose Verification Mode"]
+    Choose -->|Quick check| Snap["npx agent-lens snap --url=..."]
+    Choose -->|Step-by-step flow| Live["npx agent-lens live start -> click -> type -> stop"]
+    Choose -->|Regression / Scenarios| Scenario["npx agent-lens --scenario=..."]
+
+    Snap --> Inspect["3. Inspect Output"]
+    Live --> Inspect
+    Scenario --> Inspect
+
+    Inspect --> CheckLog["Check artifacts/latest/report.md for console errors"]
+    CheckLog --> VisionCheck{"Do you have Vision tools?"}
+    VisionCheck -->|Yes| ViewImg["View artifacts/latest/*.png or artifacts/live/current.png"]
+    VisionCheck -->|No| ReadA11y["Read artifacts/latest/a11y-tree.md (Roles, Names, Focus)"]
+
+    ViewImg --> Iterate["4. Fix errors or regressions & iterate"]
+    ReadA11y --> Iterate
+```
+
+1. **Check Logs First**: Always inspect `artifacts/latest/report.md`. If there are any **Console Errors**, fix the JavaScript / React exceptions first.
+2. **If You Have Vision (`view_image`)**: Inspect the latest generated PNGs:
+   - `artifacts/latest/01_quick_snap_desktop.png`
+   - `artifacts/latest/02_quick_snap_mobile.png`
+   - Look for clipped text, unexpected wrapping, broken flex/grid columns, or overlay bugs.
+3. **If You Are Text-Only**: Run with `--plugin=a11y-tree` and inspect:
+   - `artifacts/latest/a11y-tree.md`
+   - Verify that buttons, form inputs, headings, and dialogs are rendered with expected text and states.
+
+---
+
+## 🔌 Built-In Plugins & Extensibility
+
+AgentLens is built around a lightweight **Microkernel architecture**. The core engine is decoupled from drivers, mocks, and tooling plugins:
+
+| Plugin | Primary Purpose | How to Activate |
+| :--- | :--- | :--- |
+| `live-controller` | Background CDP session for coordinate clicks, drag-and-drop, interactive CLI loop | CLI `live` command or `--plugin=live-controller` |
+| `a11y-tree` | Semantic accessibility tree extraction into clean Markdown | `--plugin=a11y-tree` or in scenario `plugins: ['a11y-tree']` |
+| `visual-diff` | Pixel-by-pixel regression diffing with `pixelmatch` | `--plugin=visual-diff` or in scenario `plugins: ['visual-diff']` |
+| `desktop-webview2` | Windows native `.exe` testing via CDP remote port | Auto-activated on `--mode=desktop` or `--exe=path/to/app.exe` |
+| `mock-ipc` | Desktop IPC bridge mocking (`window.__mockIpc`) | Auto-activated if `scenarios/mocks.ts` exists |
+
+### 🛠️ Writing Custom Plugins On-The-Fly
+If you encounter a project constraint that cannot be handled by default options (e.g. custom authentication headers, pre-populating `localStorage`, WebSocket mocking, or database seeding), **write a 1-file plugin**:
+
+1. Create `.agent-lens/plugins/<name>.ts`.
+2. Export `definePlugin({ name: '<name>', ... })` as `default`.
+3. Use lifecycle hooks (`onContextCreated`, `extendContext`, `onAfterRun`, `teardown`).
+4. Execute via `npx agent-lens snap --plugin=<name>`.
+
+*Full instructions & examples:* [Plugin Development Reference](references/plugin-development.md) and [docs/plugins.md](file:///E:/github/agent-lens/docs/plugins.md).
 
 ---
 
@@ -77,7 +147,7 @@ await ctx.click('[data-testid="save-button"]');
 ```
 
 ### 2. Base Mocks in `scenarios/mocks.ts` (Prevent Root Crashes)
-When your app mounts, the root component (Navbar, AuthContext, Layout) often queries base endpoints (e.g. `GET_USER`, `GET_SETTINGS`, `GET_ACCOUNTS`). If your scenario only mocks one sub-action, unmocked root actions may return empty and crash the app with `Cannot read properties of null (reading 'length')`.
+When your app mounts, root components (Navbar, AuthContext, Layout) often query base endpoints (e.g. `GET_USER`, `GET_SETTINGS`, `GET_ACCOUNTS`). If your scenario only mocks one sub-action, unmocked root actions may return empty and crash the app with `Cannot read properties of null (reading 'length')`.
 - Place common base mocks in `scenarios/mocks.ts`.
 - AgentLens automatically merges `scenarios/mocks.ts` with your scenario's specific `mockIpc: [...]` overrides!
 
@@ -104,6 +174,7 @@ npx agent-lens [command] [options]
 
 ### Commands:
 - `snap`: Instant one-shot snapshot & console check of a URL or static build.
+- `live`: Interactive session (`start`, `click`, `type`, `snap`, `stop`).
 - `init`: Generate starter template in `scenarios/template.scenario.ts` and `scenarios/mocks.ts`.
 - *(default)*: Runs matching scenarios from `scenarios/`.
 
@@ -114,9 +185,11 @@ npx agent-lens [command] [options]
 | `--start="<cmd>"` | Auto-launch dev server / backend before test | *(none)* |
 | `--start-cwd=<path>` | Directory to run `--start` in (e.g. `--start-cwd=./Frontend`) | *Auto-detected* |
 | `--clean-artifacts` | Purge older test runs in `artifacts/` | `false` |
+| `--full` | Capture full scrollable page height instead of viewport | `false` |
 | `--selector=<css>` | Focus and resize-to-fit a specific component | *(none)* |
 | `--viewports=<list>` | Viewports to capture (`desktop,mobile,tablet` or `1200x800`) | `desktop,mobile` |
 | `--wait=<ms>` | Wait time after page load before taking snapshots | `1000` |
+| `--plugin=<list>` | Comma-separated plugins to load (e.g. `--plugin=a11y-tree,visual-diff`) | *(none)* |
 | `--scenario=<id>` | Name or prefix of scenario file to run | *(none)* |
 | `--all` | Run all discovered scenarios | `false` |
 | `--mode=preview\|desktop` | Engine: `preview` (Web / Live URL) or `desktop` (native .exe) | `preview` |
@@ -134,15 +207,15 @@ npx agent-lens [command] [options]
 
 ```typescript
 import { defineVisualTest, VIEWPORT_PRESETS, type TestContext } from 'agent-lens';
-```
 
-### Scenario Definition Structure:
-```typescript
 export default defineVisualTest({
   id: 'my-feature-check',
   title: 'Feature Verification',
-  route: '/dashboard', // Route or URL
+  route: '/dashboard',
   viewports: [VIEWPORT_PRESETS.DEFAULT, VIEWPORT_PRESETS.MIN_SUPPORTED],
+
+  // Load plugins for this scenario:
+  plugins: ['a11y-tree', 'visual-diff'],
 
   // HTTP REST / GraphQL Network Mocks (Vite / Next.js / Web SPA)
   mockRoutes: [
@@ -165,12 +238,11 @@ export default defineVisualTest({
   teardown: async () => {}
 });
 ```
-        
 
 ### Available `ctx` Methods:
 
 #### 📸 Capturing
-- `await ctx.capture('01_name', options?)`: Capture full page or element snapshot.
+- `await ctx.capture('01_name', options?)`: Capture snapshot (supports `{ fullPage: true, selector: '...' }`).
 - `await ctx.captureBurst('02_anim', { durationMs: 300, intervalMs: 50, selector? })`: Capture animation frames.
 
 #### 📐 Viewport Control
@@ -200,19 +272,34 @@ export default defineVisualTest({
 - `ctx.getConsoleErrors()`: Array of caught errors with stack traces.
 - `ctx.getConsoleWarnings()`: Array of caught warnings.
 
-#### 🌐 Network Route & Mock IPC (Preview mode)
-- `await ctx.setMockRoute('**/api/users', payload, options?)`: Dynamically intercepts HTTP/REST API endpoints and returns mock JSON or status codes.
+#### 🌐 Network Route & Mock IPC
+- `await ctx.setMockRoute('**/api/users', payload, options?)`: Dynamically intercepts HTTP/REST API endpoints.
 - `await ctx.setMockIpc('ACTION_NAME', payload, { type: 'SUCCESS' | 'ERROR', delayMs?: number })`: Dynamically alters mock data for hybrid IPC bridges.
-        
+
+#### 🔌 Plugin Extensions (When Plugins Are Loaded)
+- **live-controller**:
+  - `await ctx.clickCoords(x, y, options?)`
+  - `await ctx.dragAndDrop(fromX, fromY, toX, toY, steps?)`
+  - `await ctx.scrollPercent(percent)`
+  - `await ctx.snapLive(options?)`
+- **a11y-tree**:
+  - `await ctx.dumpAccessibilityTree({ selector?: string, compact?: boolean })`
+- **visual-diff**:
+  - `await ctx.compareSnapshots(currentPath, baselinePath, options?)`
+  - `await ctx.captureAndCompare(name, baselinePath, captureOptions?, diffOptions?)`
 
 ---
 
-## 📚 Detailed Examples & Use Cases
+## 📚 Complete Walkthroughs & Examples
 
-Check the dedicated example guides in `examples/` for complete walk-throughs:
+Check the dedicated example guides in `examples/`:
 1. [Instant Verification (`snap`)](examples/01-instant-verification-snap.md) — One-shot snapshotting without writing test files.
 2. [Live Dev Server Workflow](examples/02-dev-server-live-testing.md) — Testing active Vite/Next.js servers with `--start` or `--url`.
 3. [Component Isolation & Burst Animations](examples/03-component-isolation-and-animations.md) — Inspecting isolated components and CSS transitions.
 4. [Native Desktop App Testing](examples/04-desktop-native-testing.md) — Testing compiled `.exe` binaries with CDP and crash diagnostics.
 5. [Clean Teardown & Sandboxing](examples/05-clean-teardown-and-sandboxing.md) — Guaranteeing zero leftover test data using `teardown()` and `--clean`.
 6. [State Testing with Mock IPC](examples/06-state-testing-with-mock-ipc.md) — Testing empty states, errors, and data tables.
+7. [Live Controller Interactive Loop](examples/07-live-controller-interactive-loop.md) — Low-latency real-time control via CLI commands.
+8. [Semantic Accessibility Tree Inspection](examples/08-accessibility-semantic-inspection.md) — Extracting UI hierarchies for text LLMs.
+9. [Visual Regression & Pixel Diffing](examples/09-visual-regression-and-pixel-diffing.md) — Automated pixelmatch difference masks.
+10. [Authoring Custom Agent Plugins](examples/10-authoring-custom-agent-plugins.md) — Writing 1-file plugins on-the-fly.

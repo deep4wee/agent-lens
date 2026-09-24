@@ -3,22 +3,22 @@ import fs from 'fs';
 import type { Page, BrowserContext } from 'playwright';
 import {
   type VisualScenario,
-  type TestContext,
-  type ViewportPreset,
   VIEWPORT_PRESETS,
-  type CaptureOptions,
-  type CaptureBurstOptions
+  type AgentLensPlugin
 } from '../../shared/api/dsl';
 import { CaptureEngine } from '../capture/capture';
 import { VisualReporter } from '../reporter/reporter';
 import { ConsoleTracker } from '../console-tracker/consoleTracker';
-import { DesktopDriver } from '../../shared/drivers/desktopDriver';
 import { PreviewDriver } from '../../shared/drivers/previewDriver';
 import { ProcessManager } from '../../shared/lib/processManager';
+import { PluginManager } from '../../shared/lib/pluginLoader';
+import { createNavigator } from './lib/navigation';
+import { syncLatestArtifacts } from './lib/artifactsSync';
+import { buildTestContext } from './lib/contextBuilder';
 
 export interface RunOptions {
   scenario: VisualScenario;
-  targetMode?: 'desktop' | 'preview';
+  targetMode?: 'desktop' | 'preview' | string;
   artifactsRoot?: string;
   autoLaunchDesktop?: boolean;
   port?: number;
@@ -34,11 +34,12 @@ export interface RunOptions {
   headed?: boolean;
   detach?: boolean;
   globalMocks?: any[];
+  plugins?: (string | AgentLensPlugin)[];
 }
 
 export interface RunResult {
   scenarioId: string;
-  targetMode: 'desktop' | 'preview';
+  targetMode: 'desktop' | 'preview' | string;
   success: boolean;
   totalSnapshots: number;
   consoleErrors: number;
@@ -65,7 +66,6 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
   }
 
   const scenarioArtifactsDir = path.join(artifactsRoot, `${scenario.id}_${timestamp}`);
-  
   if (!fs.existsSync(scenarioArtifactsDir)) {
     fs.mkdirSync(scenarioArtifactsDir, { recursive: true });
   }
@@ -73,11 +73,26 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
   const captureEngine = new CaptureEngine(scenarioArtifactsDir);
   const consoleTracker = new ConsoleTracker();
   const defaultViewport = scenario.viewports?.[0] || VIEWPORT_PRESETS.DEFAULT;
-  let currentViewport = { width: defaultViewport.width, height: defaultViewport.height };
+  const currentViewport = { width: defaultViewport.width, height: defaultViewport.height };
 
-  let desktopDriver: DesktopDriver | null = null;
   let previewDriver: PreviewDriver | null = null;
   let processManager: ProcessManager | null = null;
+  let customDriverStop: (() => Promise<void>) | null = null;
+
+  // Initialize and load plugins
+  const pluginManager = new PluginManager();
+  const pluginSpecs = [...(options.plugins || []), ...(scenario.plugins || [])];
+  if (pluginSpecs.length > 0) {
+    await pluginManager.loadAll(pluginSpecs);
+  }
+
+  const hookContext = {
+    scenario,
+    targetMode,
+    artifactsDir: scenarioArtifactsDir,
+    cliOptions: options as unknown as Record<string, unknown>,
+    state: new Map<string, unknown>()
+  };
 
   try {
     let page: Page;
@@ -89,6 +104,7 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
     console.log(`📁 Artifacts: ${scenarioArtifactsDir}`);
     console.log(`========================================\n`);
 
+    // 1. Optional dev-server/process management
     if (options.startCommand) {
       processManager = new ProcessManager();
       await processManager.start(options.startCommand, { cwd: options.startCwd });
@@ -96,35 +112,38 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       await processManager.waitForUrl(waitTarget);
     }
 
+    // 2. Run plugin setup hooks
+    await pluginManager.runSetup(hookContext);
+
     if (typeof scenario.setup === 'function') {
       console.log(`🔧 [Scenario Setup] Executing setup hook...`);
       await scenario.setup();
     }
 
-    if (targetMode === 'desktop') {
-      desktopDriver = new DesktopDriver({
-        port: options.port || 9222,
-        autoLaunch: options.autoLaunchDesktop ?? true,
-        executablePath: options.executablePath,
-        args: options.desktopArgs,
-        env: options.desktopEnv
-      });
-      const res = await desktopDriver.start(currentViewport);
-      page = res.page;
-      context = res.context;
+    // 3. Driver Session Launch (Microkernel Pattern)
+    const customSession = await pluginManager.launchSession(
+      { currentViewport, headed: options.headed },
+      hookContext
+    );
+
+    if (customSession) {
+      page = customSession.page;
+      context = customSession.context;
+      if (customSession.stop) {
+        customDriverStop = customSession.stop;
+      }
+    } else if (targetMode === 'desktop') {
+      throw new Error(
+        `[AgentLens] Target mode is 'desktop', but no desktop plugin is registered. ` +
+        `Please add --plugin=desktop-webview2 to your command or configuration.`
+      );
     } else {
+      // Standard Core Preview Driver (Chromium)
       previewDriver = new PreviewDriver({
         wwwrootDir: options.wwwrootDir,
         url: options.url,
         headed: options.headed
       });
-
-            // Apply declarative mockIpc from scenario and global mocks before start
-      const mergedMocks = [...(options.globalMocks || []), ...(scenario.mockIpc || [])];
-      if (mergedMocks.length > 0) {
-        console.log(`📦 [Mock IPC] Applying ${mergedMocks.length} mocks`);
-        previewDriver.mockRegistry.setBatch(mergedMocks);
-      }
 
       if (scenario.mockRoutes && scenario.mockRoutes.length > 0) {
         console.log(`🌐 [Mock Network] Queuing ${scenario.mockRoutes.length} route mock(s)`);
@@ -139,233 +158,38 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
         await previewDriver.setupRouteMocks(scenario.mockRoutes);
       }
     }
-        
 
-    // Attach console error interception
+    // 4. Run plugin browser/context lifecycle hooks
+    await pluginManager.runOnContextCreated(context, hookContext);
+    await pluginManager.runOnPageCreated(page, context, hookContext);
+
+    // 5. Attach console error interception
     consoleTracker.attach(page);
     console.log(`🔍 [Console Tracker] Attached — errors and warnings will be captured\n`);
 
-    // Internal navigation function supporting live URLs and hash routing
-    const doNavigate = async (route: string) => {
-      if (route.startsWith('http://') || route.startsWith('https://')) {
-        await page.goto(route, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(300);
-        return;
-      }
-      if (route.startsWith('#')) {
-        await page.evaluate((r) => { window.location.hash = r; }, route);
-        await page.waitForTimeout(300);
-        return;
-      }
-      if (previewDriver?.baseUrl && options.url) {
-        try {
-          const fullUrl = new URL(route, previewDriver.baseUrl).toString();
-          await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(300);
-          return;
-        } catch {
-          // fallback to hash
-        }
-      }
-      const routePath = route.startsWith('/') ? route : `/${route}`;
-      await page.evaluate((r) => {
-        if (window.location.hash !== undefined) {
-          window.location.hash = r;
-        }
-      }, routePath);
-      await page.waitForTimeout(300);
-    };
+    // 6. Navigation and Context Setup
+    const doNavigate = createNavigator(page, previewDriver?.baseUrl, options.url);
 
     if (scenario.route) {
-      console.log(`[Runner] Navigating to route: ${scenario.route}`);
+      console.log(`🧭 [Runner] Navigating to initial route: ${scenario.route}`);
       await doNavigate(scenario.route);
     }
 
-    const ctx: TestContext = {
+    const { ctx } = buildTestContext({
       page,
       context,
       targetMode,
-      currentViewport,
+      initialViewport: currentViewport,
+      captureEngine,
+      consoleTracker,
+      previewDriver,
+      doNavigate
+    });
 
+    // 7. Allow plugins to extend TestContext (e.g. mock-ipc, live-controller)
+    await pluginManager.extendContext(ctx, page, hookContext);
 
-      capture: async (name: string, opts?: CaptureOptions) => {
-        console.log(`📸 [Snapshot] ${name} (${currentViewport.width}x${currentViewport.height})`);
-        return await captureEngine.takeSnapshot(page, name, currentViewport, opts);
-      },
-
-      captureBurst: async (name: string, opts: CaptureBurstOptions) => {
-        console.log(`🎬 [Burst] ${name} (duration: ${opts.durationMs}ms, interval: ${opts.intervalMs ?? 80}ms)`);
-        return await captureEngine.takeBurst(page, name, currentViewport, opts);
-      },
-
-
-      navigate: async (route: string) => {
-        console.log(`🧭 [Navigate] ${route}`);
-        await doNavigate(route);
-      },
-
-      // ─── Viewport ───
-
-      resize: async (width: number, height: number) => {
-        console.log(`📐 [Resize] ${width}x${height}`);
-        currentViewport = { width, height };
-        ctx.currentViewport = currentViewport;
-        await page.setViewportSize(currentViewport);
-        await page.waitForTimeout(200);
-      },
-
-      setPreset: async (preset: ViewportPreset) => {
-        console.log(`📐 [Preset] ${preset.name} (${preset.width}x${preset.height})`);
-        await ctx.resize(preset.width, preset.height);
-      },
-
-      resizeToFit: async (selector?: string, padding = 0) => {
-        let boundingBox;
-        if (selector) {
-          const el = await page.$(selector);
-          if (el) {
-            boundingBox = await el.boundingBox();
-          }
-        } else {
-          boundingBox = await page.evaluate(() => {
-            return {
-              width: document.documentElement.scrollWidth,
-              height: document.documentElement.scrollHeight
-            };
-          });
-        }
-
-        if (boundingBox) {
-          const newWidth = Math.ceil(boundingBox.width) + padding * 2;
-          const newHeight = Math.ceil(boundingBox.height) + padding * 2;
-          console.log(`📐 [ResizeToFit] ${selector || 'body'} -> ${newWidth}x${newHeight}`);
-          await ctx.resize(newWidth, newHeight);
-        } else {
-          console.log(`⚠️ [ResizeToFit] Element ${selector} not found or has no bounding box.`);
-        }
-      },
-
-
-      wait: async (ms: number) => {
-        await page.waitForTimeout(ms);
-      },
-
-      waitForSelector: async (selector: string, timeoutMs = 5000) => {
-        await page.waitForSelector(selector, { timeout: timeoutMs });
-      },
-
-
-      click: async (selector: string) => {
-        console.log(`🖱️ [Click] ${selector}`);
-        await page.click(selector);
-      },
-      
-      rightClick: async (selector: string) => {
-        console.log(`🖱️ [RightClick] ${selector}`);
-        await page.click(selector, { button: 'right' });
-      },
-
-      type: async (selector: string, text: string) => {
-        console.log(`⌨️ [Type] ${selector} -> "${text}"`);
-        await page.fill(selector, text);
-      },
-      
-      selectOption: async (selector: string, value: string) => {
-        console.log(`✅ [Select] ${selector} -> "${value}"`);
-        await page.selectOption(selector, value);
-      },
-
-      hover: async (selector: string) => {
-        console.log(`👆 [Hover] ${selector}`);
-        await page.hover(selector);
-      },
-      
-      scroll: async (selector: string, deltaY: number) => {
-        console.log(`📜 [Scroll] ${selector} by ${deltaY}px`);
-        await page.evaluate(({ sel, dY }) => {
-          const el = document.querySelector(sel);
-          if (el) {
-            el.scrollTop += dY;
-          } else {
-            window.scrollBy(0, dY);
-          }
-        }, { sel: selector, dY: deltaY });
-        await page.waitForTimeout(100);
-      },
-
-
-      log: (msg: string) => {
-        console.log(`ℹ️ [Scenario] ${msg}`);
-      },
-
-      // ─── Mock IPC ───
-
-            setMockIpc: async (action: string, data: any, mockOptions?) => {
-        if (targetMode === 'desktop') {
-          console.log(`⚠️ [Mock IPC] setMockIpc ignored in desktop mode (real backend handles IPC)`);
-          return;
-        }
-        if (!previewDriver) {
-          console.log(`⚠️ [Mock IPC] PreviewDriver not available`);
-          return;
-        }
-        console.log(`📦 [Mock IPC] Set ${action} -> ${typeof data === 'string' ? data : JSON.stringify(data).slice(0, 80)}...`);
-        await previewDriver.updateMockIpc(action, data, mockOptions);
-      },
-
-      setMockRoute: async (url: string, body: any, routeOptions?) => {
-        if (targetMode === 'desktop') {
-          console.log(`⚠️ [Mock Route] setMockRoute ignored in desktop mode`);
-          return;
-        }
-        if (!previewDriver) {
-          console.log(`⚠️ [Mock Route] PreviewDriver not available`);
-          return;
-        }
-        console.log(`🌐 [Mock Route] Intercepting ${routeOptions?.method || 'ALL'} ${url} -> ${routeOptions?.status ?? 200}`);
-        await previewDriver.addRouteMock({
-          url,
-          body,
-          method: routeOptions?.method,
-          status: routeOptions?.status,
-          delayMs: routeOptions?.delayMs,
-          headers: routeOptions?.headers
-        });
-      },
-
-
-      getConsoleErrors: () => consoleTracker.getErrors(),
-        
-      getConsoleWarnings: () => consoleTracker.getWarnings(),
-      hasConsoleErrors: () => consoleTracker.hasErrors,
-
-      // ─── DOM Assertions ───
-
-      readText: async (selector: string): Promise<string | null> => {
-        const text = await page.textContent(selector);
-        return text ? text.trim() : null;
-      },
-      
-      getPageText: async (): Promise<string> => {
-        return await page.evaluate(() => document.body.innerText || '');
-      },
-
-      isVisible: async (selector: string) => {
-        try {
-          const element = await page.$(selector);
-          if (!element) return false;
-          return await element.isVisible();
-        } catch {
-          return false;
-        }
-      },
-
-      getElementCount: async (selector: string) => {
-        const elements = await page.$$(selector);
-        return elements.length;
-      }
-    };
-
+    // 8. Execute the scenario body
     await scenario.run(ctx);
 
     const durationMs = Date.now() - startTime;
@@ -381,40 +205,21 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       console.log(`\n🟡 Console Warnings: ${consoleWarnings.length}`);
     }
 
-    const reportPath = VisualReporter.generateReport({
+    // 9. Generate Report & Run AfterRun Hooks
+    const reportData = {
       scenario,
       snapshots,
       consoleErrors,
       consoleWarnings,
       outputDir: scenarioArtifactsDir,
       targetMode,
-      durationMs
-    });
-
-    const syncLatest = (repPath: string, snaps: any[]) => {
-      try {
-        const latestDir = path.join(artifactsRoot, 'latest');
-        if (fs.existsSync(latestDir)) {
-          fs.rmSync(latestDir, { recursive: true, force: true });
-        }
-        fs.mkdirSync(latestDir, { recursive: true });
-        fs.copyFileSync(repPath, path.join(latestDir, 'report.md'));
-        const manifestSrc = path.join(scenarioArtifactsDir, 'manifest.json');
-        if (fs.existsSync(manifestSrc)) {
-          fs.copyFileSync(manifestSrc, path.join(latestDir, 'manifest.json'));
-        }
-        for (const snap of snaps) {
-          if (snap.filePath && fs.existsSync(snap.filePath)) {
-            fs.copyFileSync(snap.filePath, path.join(latestDir, snap.fileName));
-          }
-        }
-        return path.join(latestDir, 'report.md');
-      } catch {
-        return undefined;
-      }
+      durationMs,
+      customSections: []
     };
 
-    const latestReport = syncLatest(reportPath, snapshots);
+    await pluginManager.runOnAfterRun(reportData, hookContext);
+    const reportPath = VisualReporter.generateReport(reportData);
+    const latestReport = syncLatestArtifacts(artifactsRoot, scenarioArtifactsDir, reportPath, snapshots);
 
     console.log(`\n✅ Visual Test Completed Successfully!`);
     console.log(`📊 Captured Snapshots: ${snapshots.length}`);
@@ -442,7 +247,7 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
     const consoleErrors = consoleTracker.getErrors();
     const consoleWarnings = consoleTracker.getWarnings();
 
-    const reportPath = VisualReporter.generateReport({
+    const reportData = {
       scenario,
       snapshots,
       consoleErrors,
@@ -450,18 +255,10 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       outputDir: scenarioArtifactsDir,
       targetMode,
       durationMs
-    });
+    };
 
-    try {
-      const latestDir = path.join(artifactsRoot, 'latest');
-      if (fs.existsSync(latestDir)) {
-        fs.rmSync(latestDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(latestDir, { recursive: true });
-      fs.copyFileSync(reportPath, path.join(latestDir, 'report.md'));
-    } catch {
-      // ignore
-    }
+    const reportPath = VisualReporter.generateReport(reportData);
+    syncLatestArtifacts(artifactsRoot, scenarioArtifactsDir, reportPath, snapshots);
 
     return {
       scenarioId: scenario.id,
@@ -475,7 +272,9 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       error: err.message
     };
   } finally {
-    // 1. Run scenario teardown hook (guaranteed cleanup)
+    // 10. Guaranteed teardown sequence
+    await pluginManager.runTeardown(hookContext);
+
     if (typeof scenario.teardown === 'function') {
       try {
         console.log(`🧹 [Scenario Teardown] Executing teardown hook...`);
@@ -485,7 +284,6 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       }
     }
 
-    // 2. Perform requested file and folder cleanups
     if (options.cleanPaths && options.cleanPaths.length > 0) {
       for (const cleanTarget of options.cleanPaths) {
         try {
@@ -500,9 +298,8 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       }
     }
 
-    // 3. Stop running drivers unless detached
     if (!options.detach) {
-      if (desktopDriver) await desktopDriver.stop();
+      if (customDriverStop) await customDriverStop();
       if (previewDriver) await previewDriver.stop();
       if (processManager) await processManager.stop();
     } else {

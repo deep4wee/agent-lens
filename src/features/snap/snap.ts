@@ -17,12 +17,15 @@ export interface SnapCliOptions {
   headed?: boolean;
   detach?: boolean;
   outDir?: string;
-  mode?: 'desktop' | 'preview';
+    mode?: 'desktop' | 'preview';
   exe?: string;
   port?: number;
+  plugins?: (string | any)[];
+  fullPage?: boolean;
 }
 
 const PRESET_MAP: Record<string, ViewportPreset> = {
+        
   default: VIEWPORT_PRESETS.DEFAULT,
   desktop: VIEWPORT_PRESETS.DEFAULT,
   min: VIEWPORT_PRESETS.MIN_SUPPORTED,
@@ -133,7 +136,7 @@ export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
         ctx.log(`Switching viewport to: ${vp.name} (${vp.width}x${vp.height})`);
         await ctx.setPreset(vp);
         await ctx.wait(200);
-        await ctx.capture(`${stepNum}_${snapshotPrefix}_${vp.name}`);
+        await ctx.capture(`${stepNum}_${snapshotPrefix}_${vp.name}`, { fullPage: options.fullPage });
       }
 
       if (options.selector) {
@@ -165,12 +168,14 @@ export async function runQuickSnap(options: SnapCliOptions): Promise<boolean> {
     startCwd: options.startCwd,
     executablePath: options.exe,
     cleanPaths: options.clean,
-    cleanArtifacts: options.cleanArtifacts,
+        cleanArtifacts: options.cleanArtifacts,
     port: options.port,
     headed: options.headed,
     detach: options.detach,
-    artifactsRoot: options.outDir ? path.resolve(process.cwd(), options.outDir) : undefined
+    artifactsRoot: options.outDir ? path.resolve(process.cwd(), options.outDir) : undefined,
+    plugins: options.plugins
   });
+        
 
   console.log(`\n========================================`);
   console.log(`🏁 Quick Snap Finished!`);

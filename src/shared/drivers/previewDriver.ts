@@ -3,10 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { chromium } from '../lib/playwrightLoader';
-import { MockIpcRegistry, generateMockIpcScript } from '../../features/mock-ipc/mockIpc';
 import type { MockRouteEntry } from '../api/dsl';
 import { resolveWwwrootDir } from '../lib/config';
-        
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -35,20 +33,16 @@ export class PreviewDriver {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-    private serverPort: number = 0;
+  private serverPort: number = 0;
   private options: PreviewDriverOptions;
   private _baseUrl: string = '';
   private initialRouteMocks: MockRouteEntry[] = [];
-
-  public readonly mockRegistry: MockIpcRegistry;
-        
 
   constructor(options?: PreviewDriverOptions) {
     this.options = options || {};
     if (!this.options.url) {
       this.options.wwwrootDir = resolveWwwrootDir(this.options.wwwrootDir);
     }
-    this.mockRegistry = new MockIpcRegistry();
   }
 
   public get baseUrl(): string {
@@ -120,12 +114,7 @@ export class PreviewDriver {
       deviceScaleFactor: 1
     });
 
-    if (this.mockRegistry.size > 0) {
-      const mockScript = generateMockIpcScript(this.mockRegistry);
-      await this.context.addInitScript(mockScript);
-    }
-
-        this.page = await this.context.newPage();
+    this.page = await this.context.newPage();
 
     if (this.initialRouteMocks.length > 0) {
       for (const entry of this.initialRouteMocks) {
@@ -168,32 +157,6 @@ export class PreviewDriver {
     for (const r of routes) {
       await this.addRouteMock(r);
     }
-  }
-        
-
-  public async updateMockIpc(action: string, data: any, options?: { type?: string; delayMs?: number }): Promise<void> {
-    if (!this.page) {
-      throw new Error('PreviewDriver not started. Call start() first.');
-    }
-
-    this.mockRegistry.set(action, data, options as any);
-
-    await this.page.evaluate(
-      ({ action, mock }) => {
-        if (!(window as any).__visualRunnerMocks) {
-          (window as any).__visualRunnerMocks = {};
-        }
-        (window as any).__visualRunnerMocks[action] = mock;
-      },
-      {
-        action,
-        mock: {
-          data,
-          type: options?.type ?? 'SUCCESS',
-          delayMs: options?.delayMs ?? 20
-        }
-      }
-    );
   }
 
   public async stop(): Promise<void> {

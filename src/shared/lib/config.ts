@@ -18,6 +18,7 @@ export interface AgentLensConfigFile {
   wwwroot?: string;
   outDir?: string;
   env?: Record<string, string>;
+  plugins?: string[];
 }
 
 export function loadConfig(cwd: string = process.cwd()): AgentLensConfigFile {
