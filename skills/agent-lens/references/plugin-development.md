@@ -163,3 +163,33 @@ export default definePlugin({
   }
 });
 ```
+
+### Recipe 4: Guarding Privileged OS / Desktop Operations
+When authoring plugins that perform OS-level actions (similar to `screen-capture`):
+```typescript
+// .agent-lens/plugins/native-helper.ts
+import { definePlugin } from 'agent-lens';
+
+export default definePlugin({
+  name: 'native-helper',
+  setup: (hookContext) => {
+    // 1. Guard against accidental execution in web/preview mode
+    if (hookContext.targetMode !== 'desktop') {
+      throw new Error('[native-helper] This plugin requires desktop mode (--mode=desktop).');
+    }
+    console.log('⚠️ [native-helper] Running in privileged OS desktop mode.');
+  },
+  extendContext: () => {
+    return {
+      getSystemMemory: () => process.memoryUsage()
+    };
+  }
+});
+```
+
+---
+
+## ⚠️ Important Safety Guidelines for Plugins
+1. **Never Swallow Exceptions Silently**: If an assertion or teardown fails, let the error propagate or record it so the runner can capture it in `reportData.pluginErrors`.
+2. **Always Implement `teardown()`**: If your plugin starts background processes, opens sockets, or creates temporary folders, clean them up in `teardown()`. AgentLens guarantees `teardown()` runs even when tests fail!
+3. **Respect Target Mode**: Do not perform native desktop or OS actions if `hookContext.targetMode === 'preview'`.

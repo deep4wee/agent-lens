@@ -53,7 +53,9 @@ flowchart TD
     PM --> P3["🚀 live-controller (Interactive CDP CLI & --full)"]
     PM --> P4["♿ a11y-tree (Semantic Markdown for Text LLMs)"]
     PM --> P5["🎨 visual-diff (Pixelmatch Regression Diffing)"]
-    PM --> P6["🛠️ Custom Workspace Plugins (.agent-lens/plugins/*.ts)"]
+    PM --> P6["🎬 video-recorder (Full Scenario WebM Recording)"]
+    PM --> P7["🖥️ screen-capture (OS-Level Screen/Window & Input)"]
+    PM --> P8["🛠️ Custom Workspace Plugins (.agent-lens/plugins/*.ts)"]
 
     Runner --> Report["VisualReporter (artifacts/latest/report.md)"]
 ```
@@ -67,6 +69,8 @@ flowchart TD
 - 🚀 **Interactive Live Controller (`live`)**: Persistent background browser session with sub-50ms command execution (`click <x> <y>`, `type <sel> <text>`, `snap --full`, `stop`).
 - ♿ **Semantic Accessibility Inspector (`a11y-tree`)**: Extracts clean Markdown accessibility trees (roles, names, states, focus) so text-only LLMs can "read" the UI layout.
 - 🎨 **Visual Regression Diffing (`visual-diff`)**: Automated pixel-by-pixel comparisons with baseline images using `pixelmatch` + `pngjs`, generating difference masks (`*_diff.png`) and changed pixel percentages.
+- 🎬 **Video Recording (`video-recorder`)**: Records the entire scenario run into a smooth `.webm` video for step-by-step visual animation review and debugging.
+- 🖥️ **OS-Level Screen & Input Capture (`screen-capture`)**: Capture the full physical display or active foreground window, and send real OS mouse clicks / keystrokes outside the WebView viewport. Includes strong safety guards (desktop-only).
 - 🖥️ **Native Desktop Testing (`desktop-webview2`)**: Test compiled Windows `.exe` binaries (WebView2 / Electron / Photino) over CDP with process tree management (`treeKill`).
 - 📦 **Hybrid IPC Mock Bridge (`mock-ipc`)**: Intercept desktop IPC calls (`window.__mockIpc` and `window.external.sendMessage`) for error boundaries and offline states.
 - 🌐 **Network API Route Mocking**: Intercept REST/GraphQL calls (`mockRoutes` / `ctx.setMockRoute`) without backend dependencies.
@@ -318,6 +322,18 @@ Check the `skills/agent-lens/examples/` directory for detailed walkthroughs:
 - **[08-accessibility-semantic-inspection.md](skills/agent-lens/examples/08-accessibility-semantic-inspection.md)**: Extracting UI hierarchies for text LLMs.
 - **[09-visual-regression-and-pixel-diffing.md](skills/agent-lens/examples/09-visual-regression-and-pixel-diffing.md)**: Automated pixelmatch difference masks.
 - **[10-authoring-custom-agent-plugins.md](skills/agent-lens/examples/10-authoring-custom-agent-plugins.md)**: Writing 1-file plugins on-the-fly.
+- **[11-screen-capture-desktop.md](skills/agent-lens/examples/11-screen-capture-desktop.md)**: OS-level screen capture and input simulation with critical safety rules.
+
+---
+
+## ⚠️ Privileged OS Input & Screen Capture Notice
+
+> [!CAUTION]
+> **Use `screen-capture` strictly on compiled binaries / running apps:**  
+> The `screen-capture` plugin captures the **entire physical OS screen** and simulates **real OS hardware mouse clicks / keystrokes**.
+> - It is restricted to `--mode=desktop` scenarios.
+> - Unlike CDP, physical clicks move the actual system cursor and can hit whatever window is active.
+> - Always run on dedicated test environments or VMs, ensure no sensitive personal data/windows are visible, and prefer `captureActiveWindow()` over full-screen capture whenever possible.
 
 ---
 

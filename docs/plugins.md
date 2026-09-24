@@ -258,6 +258,30 @@ AgentLens ships with 5 core plugins out of the box:
 - **Features**: Auto-loads base mocks from `scenarios/mocks.ts` and allows runtime overrides via `await ctx.setMockIpc('ACTION', payload)`.
 - **Activation**: Auto-loaded whenever `mocks.ts` exists or a scenario specifies `mockIpc: [...]`.
 
+### 6. `video-recorder`
+- **Purpose**: Records full visual scenarios into `.webm` videos for step-by-step animation analysis, transition debugging, and visual playback.
+- **Features**:
+  - Automatically captures context-level video and finalizes output to `artifacts/<run>/recording.webm`.
+  - Synced to `artifacts/latest/recording.webm` via `artifactsSync`.
+  - Appends video status and markdown link to `report.md`.
+- **Activation**: `--plugin=video-recorder` or in scenario `plugins: ['video-recorder']`.
+
+### 7. `screen-capture`
+- **Purpose**: OS-level physical screen & active window capture and input simulation for compiled desktop applications (`.exe`).
+- **Use Cases**:
+  - Testing native OS dialogs (file open, save as, security alerts).
+  - Inspecting elements rendered outside the WebView/browser viewport (splash screens, titlebars, system notifications).
+  - Interacting with multi-window desktop apps or tray menus.
+- **Context Extensions**:
+  - `await ctx.captureScreen(name?)`: captures full physical screen as PNG.
+  - `await ctx.captureActiveWindow(name?)`: captures currently focused foreground window using Win32 API.
+  - `await ctx.clickScreenAt(x, y, options?)`: physical mouse click at absolute screen coordinates.
+  - `await ctx.pressOsKey(key)`: sends OS keystroke to active window (Enter, Escape, Tab, etc.).
+- **Activation**: `--plugin=screen-capture` or in scenario `plugins: ['screen-capture']`.
+- **Safety / Caution**:
+  > [!CAUTION]
+  > **Privileged OS Tool**: Only use `screen-capture` on compiled binaries or running web apps in `--mode=desktop`. It moves the real physical cursor and sends real keyboard events. Never use on uncontrolled user workstations with sensitive background windows open.
+
 ---
 
 ## 🤖 Writing a 1-File Plugin (Agent Guide)

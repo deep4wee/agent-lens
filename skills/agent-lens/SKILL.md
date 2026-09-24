@@ -115,6 +115,8 @@ AgentLens is built around a lightweight **Microkernel architecture**. The core e
 | `live-controller` | Background CDP session for coordinate clicks, drag-and-drop, interactive CLI loop | CLI `live` command or `--plugin=live-controller` |
 | `a11y-tree` | Semantic accessibility tree extraction into clean Markdown | `--plugin=a11y-tree` or in scenario `plugins: ['a11y-tree']` |
 | `visual-diff` | Pixel-by-pixel regression diffing with `pixelmatch` | `--plugin=visual-diff` or in scenario `plugins: ['visual-diff']` |
+| `video-recorder` | Full scenario `.webm` video recording | `--plugin=video-recorder` or in scenario `plugins: ['video-recorder']` |
+| `screen-capture` | OS-level physical screen/window capture & hardware input | `--plugin=screen-capture` (Desktop mode only) |
 | `desktop-webview2` | Windows native `.exe` testing via CDP remote port | Auto-activated on `--mode=desktop` or `--exe=path/to/app.exe` |
 | `mock-ipc` | Desktop IPC bridge mocking (`window.__mockIpc`) | Auto-activated if `scenarios/mocks.ts` exists |
 
@@ -287,6 +289,22 @@ export default defineVisualTest({
 - **visual-diff**:
   - `await ctx.compareSnapshots(currentPath, baselinePath, options?)`
   - `await ctx.captureAndCompare(name, baselinePath, captureOptions?, diffOptions?)`
+- **video-recorder**:
+  - Automatically records full run into `artifacts/<run>/recording.webm` and syncs to `artifacts/latest/recording.webm`.
+- **screen-capture** *(Desktop Mode Only)*:
+  - `await ctx.captureScreen(name?)` — full physical OS screen capture
+  - `await ctx.captureActiveWindow(name?)` — active foreground window capture
+  - `await ctx.clickScreenAt(x, y, options?)` — OS physical mouse click
+  - `await ctx.pressOsKey(key)` — OS physical keystroke
+
+---
+
+## ⚠️ Critical Safety Rules for `screen-capture`
+When using the `screen-capture` plugin:
+1. **Never use in web/preview mode**: Only for compiled `.exe` desktop apps or live desktop windows (`--mode=desktop`).
+2. **Close private windows**: OS-level capture grabs everything visible on the display, including notifications, chats, and taskbars.
+3. **Prefer `captureActiveWindow()`**: Avoid full desktop screen capture unless testing outside-window dialogs or multi-window flows.
+4. **Physical click awareness**: `clickScreenAt` moves the real OS mouse cursor.
 
 ---
 
@@ -303,3 +321,4 @@ Check the dedicated example guides in `examples/`:
 8. [Semantic Accessibility Tree Inspection](examples/08-accessibility-semantic-inspection.md) — Extracting UI hierarchies for text LLMs.
 9. [Visual Regression & Pixel Diffing](examples/09-visual-regression-and-pixel-diffing.md) — Automated pixelmatch difference masks.
 10. [Authoring Custom Agent Plugins](examples/10-authoring-custom-agent-plugins.md) — Writing 1-file plugins on-the-fly.
+11. [OS-Level Screen & Input Capture](examples/11-screen-capture-desktop.md) — Physical window capture and OS input simulation with safety rules.
