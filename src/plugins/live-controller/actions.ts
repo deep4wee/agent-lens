@@ -1,5 +1,9 @@
 import path from 'path';
+import fs from 'fs';
+import os from 'os';
+import { spawn, execSync } from 'child_process';
 import type { Page } from 'playwright';
+import treeKill from 'tree-kill';
 import {
   connectToLiveSession,
   saveLiveSession,
@@ -94,23 +98,76 @@ export async function handleLiveCli(argv: string[]): Promise<boolean> {
 
       console.log(`🚀 [Live] Starting background browser for ${urlArg} on CDP port ${portArg}...`);
 
-      const browser = await chromium.launch({
-        headless: !isHeaded,
-        args: [`--remote-debugging-port=${portArg}`, '--no-sandbox']
-      });
+      let pid: number | undefined;
+      const isWindows = process.platform === 'win32';
 
-      const context = await browser.newContext({ viewport: { width: 1200, height: 800 } });
-      const page = await context.newPage();
-      await page.goto(urlArg, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(500);
+      // Find daemon.js path
+      const daemonCandidates = [
+        path.resolve(__dirname, 'daemon.js'),
+        path.resolve(__dirname, 'plugins/live-controller/daemon.js'),
+        path.resolve(__dirname, '../plugins/live-controller/daemon.js'),
+        path.resolve(__dirname, '../../dist/plugins/live-controller/daemon.js'),
+        path.resolve(__dirname, 'daemon.ts')
+      ];
+      const daemonScript = daemonCandidates.find((c) => fs.existsSync(c)) || daemonCandidates[0];
+
+      if (isWindows) {
+        const scriptClean = daemonScript.replace(/\\/g, '/');
+        const cwdClean = process.cwd().replace(/\\/g, '/');
+        const cmd = `node "${scriptClean}" "${urlArg}" "${portArg}" "${isHeaded}"`;
+        const psCmd = `$res = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${cmd}'; CurrentDirectory = '${cwdClean}' }; Write-Output $res.ProcessId`;
+        try {
+          const out = execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { encoding: 'utf-8' }).trim();
+          pid = parseInt(out, 10) || undefined;
+        } catch {
+          const cp = spawn(process.execPath, [daemonScript, urlArg, String(portArg), String(isHeaded)], {
+            cwd: process.cwd(),
+            detached: true,
+            stdio: 'ignore'
+          });
+          cp.unref();
+          pid = cp.pid;
+        }
+      } else {
+        const cp = spawn(process.execPath, [daemonScript, urlArg, String(portArg), String(isHeaded)], {
+          cwd: process.cwd(),
+          detached: true,
+          stdio: 'ignore'
+        });
+        cp.unref();
+        pid = cp.pid;
+      }
 
       saveLiveSession({
         port: portArg,
         url: urlArg,
+        pid,
         startedAt: new Date().toISOString()
       });
 
-      await snapLive(page, { name: 'current' });
+      // Poll until CDP is available, then take initial snapshot
+      let connected = false;
+      const startTime = Date.now();
+      while (Date.now() - startTime < 15000) {
+        try {
+          const { page } = await connectToLiveSession();
+          await page.waitForLoadState('domcontentloaded').catch(() => {});
+          await snapLive(page, { name: 'current' });
+          connected = true;
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+
+      if (!connected) {
+        console.error(`❌ [Live] Could not connect to background browser on port ${portArg}`);
+        if (pid) {
+          treeKill(pid, 'SIGTERM', () => {});
+        }
+        return false;
+      }
+
       console.log(`✅ [Live] Session active! You can now send live commands:\n`);
       console.log(`   npx agent-lens live click 450 120`);
       console.log(`   npx agent-lens live type "input" "hello"`);
@@ -120,7 +177,7 @@ export async function handleLiveCli(argv: string[]): Promise<boolean> {
     }
 
     case 'click': {
-      const { page, browser } = await connectToLiveSession();
+      const { page } = await connectToLiveSession();
       const firstArg = argv[1];
       const secondArg = argv[2];
 
@@ -134,7 +191,6 @@ export async function handleLiveCli(argv: string[]): Promise<boolean> {
         await page.click(firstArg);
       } else {
         console.error(`❌ Usage: npx agent-lens live click <x> <y> OR npx agent-lens live click <selector>`);
-        await browser.close();
         return false;
       }
 
@@ -143,13 +199,12 @@ export async function handleLiveCli(argv: string[]): Promise<boolean> {
     }
 
     case 'type': {
-      const { page, browser } = await connectToLiveSession();
+      const { page } = await connectToLiveSession();
       const selector = argv[1];
       const text = argv[2];
 
       if (!selector || text === undefined) {
         console.error(`❌ Usage: npx agent-lens live type <selector> <text>`);
-        await browser.close();
         return false;
       }
 

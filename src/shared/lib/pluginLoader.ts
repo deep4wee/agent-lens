@@ -3,7 +3,7 @@ import fs from 'fs';
 import { createJiti } from 'jiti';
 import type { AgentLensPlugin, PluginHookContext, DriverLaunchResult } from '../api/plugin';
 import type { TestContext } from '../api/dsl';
-import type { ReportData } from '../types/report';
+import type { ReportData, PluginError } from '../types/report';
 import type { Page, BrowserContext } from 'playwright';
 
 function findPackageRoot(): string {
@@ -25,9 +25,50 @@ function findPackageRoot(): string {
   return path.resolve(__dirname, '..');
 }
 
+function extractPlugin(mod: any): AgentLensPlugin | null {
+  if (!mod || typeof mod !== 'object') return null;
+  const candidates = [
+    mod.default?.default,
+    mod.default,
+    mod.plugin,
+    mod
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'object' && typeof c.name === 'string') {
+      return c as AgentLensPlugin;
+    }
+  }
+  for (const key of Object.keys(mod)) {
+    const val = mod[key];
+    if (val && typeof val === 'object' && typeof val.name === 'string') {
+      return val as AgentLensPlugin;
+    }
+  }
+  return null;
+}
+
 export class PluginManager {
   private plugins: AgentLensPlugin[] = [];
   private jiti = createJiti(process.cwd());
+  private pluginErrors: PluginError[] = [];
+
+  private recordError(
+    pluginName: string,
+    hook: PluginError['hook'],
+    err: unknown
+  ): void {
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error(`⚠️ [Plugin] Error in ${pluginName}.${hook}: ${e.message}`);
+    this.pluginErrors.push({ pluginName, hook, message: e.message, stack: e.stack });
+  }
+
+  public clearErrors(): void {
+    this.pluginErrors = [];
+  }
+
+  public getPluginErrors(): PluginError[] {
+    return [...this.pluginErrors];
+  }
 
   public register(plugin: AgentLensPlugin): void {
     if (this.plugins.some((p) => p.name === plugin.name)) {
@@ -101,14 +142,15 @@ export class PluginManager {
     // 4. Fallback to npm package resolution (e.g. @agent-lens/plugin-xxx)
     try {
       const mod = await this.jiti.import(pluginNameOrPath) as any;
-      const plugin: AgentLensPlugin = mod.default || mod.plugin || mod;
-      if (plugin && plugin.name) {
+      const plugin = extractPlugin(mod);
+      if (plugin) {
         this.register(plugin);
       } else {
         console.warn(`⚠️ [Plugin] Package "${pluginNameOrPath}" did not export a valid AgentLensPlugin.`);
       }
-    } catch (err: any) {
-      console.warn(`⚠️ [Plugin] Could not load plugin '${pluginNameOrPath}': ${err.message}`);
+    } catch (err: unknown) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      console.warn(`⚠️ [Plugin] Could not load plugin '${pluginNameOrPath}': ${e.message}`);
     }
   }
 
@@ -120,14 +162,15 @@ export class PluginManager {
 
     try {
       const mod = await this.jiti.import(filePath) as any;
-      const plugin: AgentLensPlugin = mod.default || mod.plugin || mod;
-      if (plugin && plugin.name) {
+      const plugin = extractPlugin(mod);
+      if (plugin) {
         this.register(plugin);
       } else {
         console.warn(`⚠️ [Plugin] File "${filePath}" does not export a valid AgentLensPlugin by default.`);
       }
-    } catch (err: any) {
-      console.error(`❌ [Plugin] Failed to import plugin from ${filePath}:`, err.message);
+    } catch (err: unknown) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      console.error(`❌ [Plugin] Failed to import plugin from ${filePath}:`, e.message);
     }
   }
 
@@ -139,7 +182,13 @@ export class PluginManager {
 
   public async runSetup(hookContext: PluginHookContext): Promise<void> {
     for (const p of this.plugins) {
-      if (p.setup) await p.setup(hookContext);
+      if (p.setup) {
+        try {
+          await p.setup(hookContext);
+        } catch (err: unknown) {
+          this.recordError(p.name, 'setup', err);
+        }
+      }
     }
   }
 
@@ -149,9 +198,13 @@ export class PluginManager {
   ): Promise<DriverLaunchResult | undefined> {
     for (const p of this.plugins) {
       if (p.launchSession) {
-        const session = await p.launchSession(options, hookContext);
-        if (session) {
-          return session;
+        try {
+          const session = await p.launchSession(options, hookContext);
+          if (session) {
+            return session;
+          }
+        } catch (err: unknown) {
+          this.recordError(p.name, 'launchSession', err);
         }
       }
     }
@@ -160,22 +213,38 @@ export class PluginManager {
 
   public async runOnContextCreated(context: BrowserContext, hookContext: PluginHookContext): Promise<void> {
     for (const p of this.plugins) {
-      if (p.onContextCreated) await p.onContextCreated(context, hookContext);
+      if (p.onContextCreated) {
+        try {
+          await p.onContextCreated(context, hookContext);
+        } catch (err: unknown) {
+          this.recordError(p.name, 'onContextCreated', err);
+        }
+      }
     }
   }
 
   public async runOnPageCreated(page: Page, context: BrowserContext, hookContext: PluginHookContext): Promise<void> {
     for (const p of this.plugins) {
-      if (p.onPageCreated) await p.onPageCreated(page, context, hookContext);
+      if (p.onPageCreated) {
+        try {
+          await p.onPageCreated(page, context, hookContext);
+        } catch (err: unknown) {
+          this.recordError(p.name, 'onPageCreated', err);
+        }
+      }
     }
   }
 
   public async extendContext(ctx: TestContext, page: Page, hookContext: PluginHookContext): Promise<void> {
     for (const p of this.plugins) {
       if (p.extendContext) {
-        const extensions = await p.extendContext(ctx, page, hookContext);
-        if (extensions && typeof extensions === 'object') {
-          Object.assign(ctx, extensions);
+        try {
+          const extensions = await p.extendContext(ctx, page, hookContext);
+          if (extensions && typeof extensions === 'object') {
+            Object.assign(ctx, extensions);
+          }
+        } catch (err: unknown) {
+          this.recordError(p.name, 'extendContext', err);
         }
       }
     }
@@ -183,7 +252,13 @@ export class PluginManager {
 
   public async runOnAfterRun(reportData: ReportData, hookContext: PluginHookContext): Promise<void> {
     for (const p of this.plugins) {
-      if (p.onAfterRun) await p.onAfterRun(reportData, hookContext);
+      if (p.onAfterRun) {
+        try {
+          await p.onAfterRun(reportData, hookContext);
+        } catch (err: unknown) {
+          this.recordError(p.name, 'onAfterRun', err);
+        }
+      }
     }
   }
 
@@ -192,8 +267,8 @@ export class PluginManager {
       if (p.teardown) {
         try {
           await p.teardown(hookContext);
-        } catch (e: any) {
-          console.error(`⚠️ [Plugin] Error in ${p.name}.teardown:`, e.message);
+        } catch (err: unknown) {
+          this.recordError(p.name, 'teardown', err);
         }
       }
     }

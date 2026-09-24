@@ -153,10 +153,6 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       const res = await previewDriver.start(currentViewport);
       page = res.page;
       context = res.context;
-
-      if (scenario.mockRoutes && scenario.mockRoutes.length > 0) {
-        await previewDriver.setupRouteMocks(scenario.mockRoutes);
-      }
     }
 
     // 4. Run plugin browser/context lifecycle hooks
@@ -214,10 +210,15 @@ export async function runVisualScenario(options: RunOptions): Promise<RunResult>
       outputDir: scenarioArtifactsDir,
       targetMode,
       durationMs,
-      customSections: []
+      customSections: [],
+      pluginErrors: [] as import('../../shared/types/report').PluginError[]
     };
 
     await pluginManager.runOnAfterRun(reportData, hookContext);
+
+    // Collect any plugin errors accumulated during the entire run (all hooks)
+    reportData.pluginErrors = pluginManager.getPluginErrors();
+
     const reportPath = VisualReporter.generateReport(reportData);
     const latestReport = syncLatestArtifacts(artifactsRoot, scenarioArtifactsDir, reportPath, snapshots);
 

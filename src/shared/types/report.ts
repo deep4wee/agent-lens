@@ -6,6 +6,14 @@ export interface ReportSection {
   content: string;
 }
 
+/** Captures errors thrown by plugin lifecycle hooks (setup, teardown, etc.) */
+export interface PluginError {
+  pluginName: string;
+  hook: 'setup' | 'launchSession' | 'onContextCreated' | 'onPageCreated' | 'extendContext' | 'onAfterRun' | 'teardown';
+  message: string;
+  stack?: string;
+}
+
 export interface ReportData {
   scenario: VisualScenario;
   snapshots: SnapshotMetadata[];
@@ -15,4 +23,5 @@ export interface ReportData {
   targetMode: 'desktop' | 'preview' | string;
   durationMs: number;
   customSections?: ReportSection[];
+  pluginErrors?: PluginError[];
 }

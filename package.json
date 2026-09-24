@@ -35,6 +35,16 @@
       "types": "./dist/plugins/visual-diff/index.d.ts",
       "import": "./dist/plugins/visual-diff/index.mjs",
       "require": "./dist/plugins/visual-diff/index.js"
+    },
+    "./plugins/video-recorder": {
+      "types": "./dist/plugins/video-recorder/index.d.ts",
+      "import": "./dist/plugins/video-recorder/index.mjs",
+      "require": "./dist/plugins/video-recorder/index.js"
+    },
+    "./plugins/screen-capture": {
+      "types": "./dist/plugins/screen-capture/index.d.ts",
+      "import": "./dist/plugins/screen-capture/index.mjs",
+      "require": "./dist/plugins/screen-capture/index.js"
     }
   },
   "bin": {
@@ -55,7 +65,10 @@
     "clean": "node -e \"const fs = require('fs'); ['dist', 'artifacts'].forEach(d => fs.rmSync(d, {recursive: true, force: true})); const files = fs.readdirSync('.'); files.filter(f => f.endsWith('.tgz')).forEach(f => fs.unlinkSync(f));\"",
     "build": "npm run clean && tsup",
     "build:pack": "npm run build && npm pack",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "peerDependencies": {
     "playwright": "^1.40.0"
@@ -64,9 +77,11 @@
     "@types/node": "^20.19.43",
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
+    "@vitest/coverage-v8": "^2.1.9",
     "playwright": "^1.63.0",
     "tsup": "^8.0.2",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "jiti": "^2.7.0",

@@ -114,6 +114,28 @@ export class VisualReporter {
       }
     }
 
+    // Plugin errors section
+    let pluginErrorSection = '';
+    const pluginErrors = data.pluginErrors ?? [];
+    if (pluginErrors.length > 0) {
+      pluginErrorSection += `\n## 🔌 Plugin Errors (${pluginErrors.length})\n\n`;
+      pluginErrorSection += `> [!CAUTION]\n> **${pluginErrors.length}** plugin lifecycle hook(s) threw errors during this run. Plugin output may be incomplete.\n\n`;
+      pluginErrorSection += `| # | Plugin | Hook | Error |\n| :-: | :--- | :--- | :--- |\n`;
+      pluginErrors.forEach((pe, i) => {
+        const msg = pe.message.replace(/\|/g, '\\|').slice(0, 200);
+        pluginErrorSection += `| ${i + 1} | \`${pe.pluginName}\` | \`${pe.hook}\` | ${msg} |\n`;
+      });
+
+      const withStack = pluginErrors.filter((pe) => pe.stack);
+      if (withStack.length > 0) {
+        pluginErrorSection += `\n<details>\n<summary>📋 Plugin Stack Traces (${withStack.length})</summary>\n\n`;
+        withStack.forEach((pe, i) => {
+          pluginErrorSection += `**Error ${i + 1} — ${pe.pluginName}.${pe.hook}:** \`${pe.message.slice(0, 100)}\`\n\`\`\`\n${pe.stack}\n\`\`\`\n\n`;
+        });
+        pluginErrorSection += `</details>\n`;
+      }
+    }
+
     const reportContent = `# 📸 Visual Test Report: ${scenario.title}
 
 > **Scenario ID:** \`${scenario.id}\`  
@@ -133,14 +155,15 @@ ${rows.join('\n')}
 
 ${burstSections}
 ${consoleSections}
+${pluginErrorSection}
 ${pluginSections}
 ---
 
 ## 📋 AI Agent Verification Checklist:
 - [ ] **Console Errors**: ${consoleErrors.length === 0 ? '✅ No errors found' : `❌ ${consoleErrors.length} errors — MUST REVIEW`}
+- [ ] **Plugin Errors**: ${pluginErrors.length === 0 ? '✅ All plugins ran cleanly' : `❌ ${pluginErrors.length} plugin error(s) — plugin output may be incomplete`}
 - [ ] **Visual Layout Check**: Inspect snapshots (e.g. view_image on \`./01_${regularSnapshots[0]?.fileName || 'quick_snap'}\`) for layout shifts or clipped elements.
 - [ ] **Responsiveness at \`1024x768\`**: Elements do not overflow the screen, no unwanted horizontal scroll.
-        
 - [ ] **Typography & Spacing**: Spacing matches the design system and layout grids.
 - [ ] **Color Palette & Theme**: Background tints and button accent colors match the concept.
 - [ ] **Component States**: Modals open centered, dropdowns do not overlap with other layers (z-index).
