@@ -97,6 +97,24 @@ export function resolveWwwrootDir(customDir?: string): string {
     'client/dist'
   ];
 
+  // Scan src/ and ../src/ subdirectories for wwwroot or dist (common in .NET WebView2 / Photino / Tauri projects)
+  for (const base of [process.cwd(), path.resolve(process.cwd(), '..')]) {
+    const srcDir = path.join(base, 'src');
+    if (fs.existsSync(srcDir)) {
+      try {
+        const srcEntries = fs.readdirSync(srcDir, { withFileTypes: true });
+        for (const entry of srcEntries) {
+          if (entry.isDirectory()) {
+            candidates.push(path.join(srcDir, entry.name, 'wwwroot'));
+            candidates.push(path.join(srcDir, entry.name, 'dist'));
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   for (const c of candidates) {
     const candidatePath = path.resolve(process.cwd(), c);
     if (fs.existsSync(candidatePath) && fs.existsSync(path.join(candidatePath, 'index.html'))) {

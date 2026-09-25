@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
@@ -97,8 +98,24 @@ async function main() {
 
   console.log(`📋 Found ${scenarioPaths.length} scenario(s) in: ${scenariosDir}`);
 
-  // Initialize JITI for seamless TypeScript loading
-  const jiti = createJiti(process.cwd());
+  // Initialize JITI with alias support so scenarios can import either 'agent-lens' or '@_deep4wee/agent-lens'
+  const entryPointCandidates = [
+    path.resolve(__dirname, 'index.js'),
+    path.resolve(__dirname, '../index.js'),
+    path.resolve(__dirname, '../dist/index.js'),
+    path.resolve(__dirname, '../index.ts'),
+    path.resolve(__dirname, './index.ts'),
+  ];
+  const agentLensEntry = entryPointCandidates.find(p => fs.existsSync(p));
+
+  const jiti = createJiti(process.cwd(), {
+    alias: agentLensEntry
+      ? {
+          'agent-lens': agentLensEntry,
+          '@_deep4wee/agent-lens': agentLensEntry
+        }
+      : undefined
+  });
 
   // Check for global mocks
   let globalMocks: any[] = [];
